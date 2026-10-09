@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 pub fn expand_home(path: &str, home: &Path) -> Result<PathBuf, String> {
     if path == "~" {
@@ -35,17 +38,116 @@ pub fn resolve_cwd(default: &str, action: Option<&str>, home: &Path) -> Result<P
     cwd.canonicalize().map_err(|error| error.to_string())
 }
 
-pub fn resolve_program(program: &str, cwd: &Path, home: &Path) -> Result<String, String> {
+pub fn resolve_program(
+    program: &str,
+    cwd: &Path,
+    home: &Path,
+    environment: &BTreeMap<String, String>,
+) -> Result<String, String> {
     let path = expand_home(program, home)?;
-    if path.is_absolute() || program.contains('/') || program.contains('\\') {
-        let absolute = if path.is_absolute() {
-            path
+    let has_path = path.is_absolute()
+        || path.components().count() > 1
+        || program.contains('/')
+        || program.contains('\\');
+    #[cfg(windows)]
+    {
+        let search_path = windows_environment(environment, "PATH").unwrap_or_default();
+        let extensions = windows_extensions(windows_environment(environment, "PATHEXT").as_deref());
+        let candidates = if has_path {
+            let absolute = if path.is_absolute() {
+                path
+            } else {
+                cwd.join(path)
+            };
+            if !absolute.is_absolute() {
+                return Err(
+                    "程序路径不能使用 C:foo 这样的驱动器相对路径，请使用绝对路径或 ./...".into(),
+                );
+            }
+            vec![absolute]
         } else {
-            cwd.join(path)
+            std::env::split_paths(&search_path)
+                .filter(|directory| !directory.as_os_str().is_empty())
+                .filter_map(|directory| {
+                    let directory = if directory.is_absolute() {
+                        directory
+                    } else {
+                        cwd.join(directory)
+                    };
+                    directory.is_absolute().then(|| directory.join(&path))
+                })
+                .collect()
         };
-        return Ok(absolute.to_string_lossy().into_owned());
+        return find_windows_program(&candidates, &extensions)
+            .map(|found| found.to_string_lossy().into_owned())
+            .ok_or_else(|| format!("找不到程序 {program}：请检查 bullet 的 PATH 或动作环境变量中的 PATH。Windows 支持 .exe/.com/.cmd/.bat；修改系统 PATH 后请重启 bullet。"));
     }
-    Ok(program.to_string())
+    #[cfg(not(windows))]
+    {
+        let _ = environment; // Command uses the child's PATH on Unix.
+        if has_path {
+            let absolute = if path.is_absolute() {
+                path
+            } else {
+                cwd.join(path)
+            };
+            Ok(absolute.to_string_lossy().into_owned())
+        } else {
+            Ok(program.to_string())
+        }
+    }
+}
+
+#[cfg(windows)]
+fn windows_environment(
+    environment: &BTreeMap<String, String>,
+    name: &str,
+) -> Option<std::ffi::OsString> {
+    // Match Command::envs: Windows keys ignore case and the last configured spelling wins.
+    environment
+        .iter()
+        .rev()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.into())
+        .or_else(|| std::env::var_os(name))
+}
+
+#[cfg(any(windows, test))]
+fn windows_extensions(value: Option<&std::ffi::OsStr>) -> Vec<String> {
+    let value = value
+        .map(|value| value.to_string_lossy())
+        .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".into());
+    let mut extensions = Vec::new();
+    for extension in value
+        .split(';')
+        .map(|part| part.trim().to_ascii_lowercase())
+    {
+        if [".com", ".exe", ".bat", ".cmd"].contains(&extension.as_str())
+            && !extensions.contains(&extension)
+        {
+            extensions.push(extension);
+        }
+    }
+    extensions
+}
+
+#[cfg(any(windows, test))]
+fn find_windows_program(candidates: &[PathBuf], extensions: &[String]) -> Option<PathBuf> {
+    for candidate in candidates {
+        if candidate.extension().is_some() && candidate.is_file() {
+            return Some(candidate.clone());
+        }
+        // npm also creates an extensionless Unix shim. Prefer the Windows entry point.
+        for extension in extensions {
+            let mut filename = candidate.as_os_str().to_os_string();
+            filename.push(extension);
+            let file = PathBuf::from(filename);
+            if file.is_file() {
+                return Some(file);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -61,5 +163,80 @@ mod tests {
         );
         assert!(resolve_cwd("~", Some("missing"), root.path()).is_err());
         assert!(expand_home("~someone", root.path()).is_err());
+    }
+
+    #[test]
+    fn windows_name_finds_npm_cmd_instead_of_extensionless_shim() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("pi"), "#!/bin/sh\n").unwrap();
+        std::fs::write(root.path().join("pi.ps1"), "# PowerShell shim").unwrap();
+        let cmd = root.path().join("pi.cmd");
+        std::fs::write(&cmd, "@echo off\r\n").unwrap();
+        assert_eq!(
+            find_windows_program(&[root.path().join("pi")], &windows_extensions(None)),
+            Some(cmd)
+        );
+    }
+
+    #[test]
+    fn windows_search_preserves_path_order_and_extension_preference() {
+        let root = tempfile::tempdir().unwrap();
+        let first = root.path().join("first");
+        let second = root.path().join("second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        std::fs::write(first.join("tool.cmd"), "").unwrap();
+        std::fs::write(second.join("tool.exe"), "").unwrap();
+        let candidates = [first.join("tool"), second.join("tool")];
+        let preferred = windows_extensions(Some(std::ffi::OsStr::new(".EXE;.CMD;.exe;.PS1")));
+        assert_eq!(preferred, vec![".exe", ".cmd"]);
+        assert_eq!(
+            find_windows_program(&candidates, &preferred),
+            Some(first.join("tool.cmd"))
+        );
+        std::fs::write(first.join("tool.exe"), "").unwrap();
+        assert_eq!(
+            find_windows_program(&candidates, &preferred),
+            Some(first.join("tool.exe"))
+        );
+        let cmd_first = windows_extensions(Some(std::ffi::OsStr::new(".CMD;.EXE")));
+        assert_eq!(
+            find_windows_program(&candidates, &cmd_first),
+            Some(first.join("tool.cmd"))
+        );
+    }
+
+    #[test]
+    fn windows_explicit_extension_is_not_replaced_and_directories_are_not_programs() {
+        let root = tempfile::tempdir().unwrap();
+        let explicit = root.path().join("pi.cmd");
+        std::fs::write(&explicit, "").unwrap();
+        std::fs::write(root.path().join("pi.exe"), "").unwrap();
+        std::fs::create_dir(root.path().join("missing.cmd")).unwrap();
+        let extensions = windows_extensions(None);
+        assert_eq!(
+            find_windows_program(&[explicit.clone()], &extensions),
+            Some(explicit)
+        );
+        assert_eq!(
+            find_windows_program(&[root.path().join("missing")], &extensions),
+            None
+        );
+        assert_eq!(find_windows_program(&[root.path().join("pi")], &[]), None);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_bare_command_remains_a_path_lookup() {
+        let root = tempfile::tempdir().unwrap();
+        let env = BTreeMap::new();
+        assert_eq!(
+            resolve_program("pi", root.path(), root.path(), &env).unwrap(),
+            "pi"
+        );
+        assert_eq!(
+            resolve_program("./bin/pi", root.path(), root.path(), &env).unwrap(),
+            root.path().join("./bin/pi").to_string_lossy()
+        );
     }
 }

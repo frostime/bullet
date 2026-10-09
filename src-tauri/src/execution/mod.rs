@@ -199,7 +199,7 @@ impl RunManager {
             )?)
         };
         let program = if let Some(cwd) = &cwd {
-            paths::resolve_program(&action.program, cwd, &self.config.home)?
+            paths::resolve_program(&action.program, cwd, &self.config.home, &action.env)?
         } else {
             String::new()
         };

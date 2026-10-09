@@ -12,6 +12,8 @@ pub async fn execute(
     id: &str,
     limit: usize,
 ) -> Result<ExecutionResult, ExecutionFailure> {
+    // Windows names are resolved to .exe/.com/.cmd/.bat before spawning. Pass args through
+    // Command so Rust performs its batch-file escaping; never build a raw `cmd /c` string.
     let mut command = Command::new(&prepared.program);
     command
         .args(&prepared.args)

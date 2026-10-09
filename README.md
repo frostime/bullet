@@ -32,6 +32,8 @@ npm run desktop
 
 配置在 Windows 用户主目录的 `.config/bullet/config.json`，例如 `C:\Users\you\.config\bullet\config.json`。默认工作目录为用户主目录，每个动作可以覆盖。程序通过 PATH 或完整路径定位。默认的整理文本动作需要 Python。
 
+Windows 的运行程序可以直接填写 `pi`、`uv`、`python` 等名称。bullet 按有效 PATH 和 PATHEXT 的 .com/.exe/.bat/.cmd 项查找，包括 npm 的 `pi.cmd` 入口，无需在配置中填写绝对路径。动作环境变量可以覆盖 PATH/PATHEXT；PATH 覆盖需要提供完整搜索路径。修改系统 PATH 后重启 bullet。终端中的 PowerShell alias/函数不会自动加载；程序参数单独填写在参数数组中。
+
 托管脚本在 `.config/bullet/scripts/<action-id>/main.<extension>`，运行时使用不可变版本。源码编辑由 bullet 管理；不需要把脚本散落到各个工作目录。
 
 ## 配置示例
