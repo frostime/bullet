@@ -1,0 +1,168 @@
+[
+  {
+    "enabled": false,
+    "program": "",
+    "args": [],
+    "cwd": null,
+    "env": {},
+    "input": "stdin",
+    "timeoutSec": 60,
+    "output": {
+      "mode": "buffered",
+      "encoding": "utf-8"
+    },
+    "scriptExtension": "py",
+    "id": "translate",
+    "name": "翻译",
+    "kind": "http",
+    "http": {
+      "url": "https://api.openai.com/v1/chat/completions",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Bearer ${env:OPENAI_API_KEY}"
+      },
+      "body": {
+        "model": "YOUR_MODEL",
+        "messages": [
+          {
+            "role": "system",
+            "content": "Translate the user text into Chinese. Return only the translation."
+          },
+          {
+            "role": "user",
+            "content": "{{input}}"
+          }
+        ]
+      },
+      "response": {
+        "format": "json",
+        "pointer": "/choices/0/message/content"
+      }
+    }
+  },
+  {
+    "enabled": false,
+    "program": "",
+    "args": [],
+    "cwd": null,
+    "env": {},
+    "input": "stdin",
+    "timeoutSec": 60,
+    "output": {
+      "mode": "live",
+      "encoding": "utf-8"
+    },
+    "scriptExtension": "py",
+    "id": "translate-stream",
+    "name": "翻译（流式）",
+    "kind": "http",
+    "http": {
+      "url": "https://api.openai.com/v1/chat/completions",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Bearer ${env:OPENAI_API_KEY}"
+      },
+      "body": {
+        "model": "YOUR_MODEL",
+        "messages": [
+          {
+            "role": "system",
+            "content": "Translate the user text into Chinese. Return only the translation."
+          },
+          {
+            "role": "user",
+            "content": "{{input}}"
+          }
+        ],
+        "stream": true
+      },
+      "response": {
+        "format": "sse",
+        "pointer": "/choices/0/delta/content",
+        "doneMarker": "[DONE]"
+      }
+    }
+  },
+  {
+    "enabled": false,
+    "program": "",
+    "args": [],
+    "cwd": null,
+    "env": {},
+    "input": "stdin",
+    "timeoutSec": 60,
+    "output": {
+      "mode": "buffered",
+      "encoding": "utf-8"
+    },
+    "scriptExtension": "py",
+    "id": "siyuan-inbox",
+    "name": "写入思源",
+    "kind": "http",
+    "http": {
+      "url": "http://127.0.0.1:6806/api/block/appendBlock",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Token ${env:SIYUAN_TOKEN}"
+      },
+      "body": {
+        "dataType": "markdown",
+        "data": "{{input}}",
+        "parentID": "YOUR_DOCUMENT_ID"
+      },
+      "response": {
+        "format": "json",
+        "success": {
+          "pointer": "/code",
+          "equals": 0
+        },
+        "successText": "已写入思源"
+      }
+    }
+  },
+  {
+    "enabled": false,
+    "program": "pi",
+    "args": [
+      "--print",
+      "--system-prompt",
+      "prompts/routine.md"
+    ],
+    "cwd": "D:\\notes",
+    "env": {},
+    "input": "stdin",
+    "timeoutSec": null,
+    "output": {
+      "mode": "buffered",
+      "encoding": "utf-8"
+    },
+    "scriptExtension": "py",
+    "id": "pi-routine",
+    "name": "PI routine",
+    "kind": "cli"
+  },
+  {
+    "enabled": false,
+    "program": "uv",
+    "args": [
+      "run",
+      "--no-project",
+      "{{script}}"
+    ],
+    "cwd": null,
+    "env": {
+      "PYTHONIOENCODING": "utf-8",
+      "PYTHONUNBUFFERED": "1"
+    },
+    "input": "stdin",
+    "timeoutSec": 60,
+    "output": {
+      "mode": "live",
+      "encoding": "utf-8"
+    },
+    "scriptExtension": "py",
+    "id": "uv-script",
+    "name": "UV 托管脚本",
+    "kind": "script"
+  }
+]

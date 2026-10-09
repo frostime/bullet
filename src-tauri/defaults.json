@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "settings": { "defaultCwd": "~", "notifications": "background", "historyLimit": 20, "maxOutputBytes": 1048576 },
+  "actions": [
+    {
+      "id": "normalize-text", "name": "整理文本", "kind": "script", "enabled": true,
+      "program": "python", "args": ["-u", "{{script}}"], "cwd": null,
+      "env": {"PYTHONIOENCODING": "utf-8"}, "input": "stdin", "timeoutSec": 60,
+      "output": {"mode": "live", "encoding": "utf-8"}, "scriptExtension": "py"
+    },
+    {
+      "id": "show-cwd", "name": "查看工作目录", "kind": "cli", "enabled": true,
+      "program": "powershell.exe", "args": ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); Get-Location | Select-Object -ExpandProperty Path"],
+      "input": "stdin", "output": {"mode": "buffered", "encoding": "utf-8"}
+    }
+  ]
+}
