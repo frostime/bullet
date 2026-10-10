@@ -16,15 +16,42 @@ pub fn expand_home(path: &str, home: &Path) -> Result<PathBuf, String> {
     Ok(PathBuf::from(path))
 }
 
+/// Syntax validation does not require the directory to exist.
+pub fn validate_cwd(value: &str, allow_relative: bool) -> Result<(), String> {
+    let value = value.trim();
+    if value.starts_with('~') {
+        if value == "~" || value.starts_with("~/") || value.starts_with("~\\") {
+            return Ok(());
+        }
+        return Err("仅支持 ~、~/... 或 ~\\...，不支持 ~用户名".into());
+    }
+    let path = Path::new(value);
+    if value.is_empty() || (!allow_relative && !path.is_absolute()) {
+        return Err("默认工作目录必须是绝对路径或 ~/...".into());
+    }
+    #[cfg(windows)]
+    if path.has_root() != path.is_absolute()
+        || (matches!(
+            path.components().next(),
+            Some(std::path::Component::Prefix(_))
+        ) && !path.is_absolute())
+    {
+        return Err("工作目录不能使用驱动器相对路径或无驱动器的根路径".into());
+    }
+    Ok(())
+}
+
 pub fn resolve_cwd(default: &str, action: Option<&str>, home: &Path) -> Result<PathBuf, String> {
-    let base = expand_home(default, home)?;
+    validate_cwd(default, false)?;
+    let base = expand_home(default.trim(), home)?;
     if !base.is_absolute() {
         return Err("默认工作目录必须是绝对路径".into());
     }
     let cwd = match action.filter(|value| !value.trim().is_empty()) {
         None => base,
         Some(value) => {
-            let candidate = expand_home(value, home)?;
+            validate_cwd(value, true)?;
+            let candidate = expand_home(value.trim(), home)?;
             if candidate.is_absolute() {
                 candidate
             } else {

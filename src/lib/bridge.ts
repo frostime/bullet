@@ -2,7 +2,7 @@ import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import defaults from '../../src-tauri/defaults.json';
-import type { Action, Config, ConfigSnapshot, RunEvent, RunSnapshot, RunSummary, ScriptSnapshot } from './types';
+import type { Action, Config, ConfigSnapshot, RunEvent, RunSnapshot, RunSummary, ScriptSnapshot, TraceEntry } from './types';
 
 export const native = isTauri();
 export const demoEvents = new EventTarget();
@@ -18,18 +18,46 @@ function loadDemoConfig(): Config {
   return JSON.parse(JSON.stringify(defaults));
 }
 function revision(value: unknown): string { return JSON.stringify(value); }
+async function demoTraceRevision(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return 'demo-sha256:' + Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
 function demoConfigSnapshot(): ConfigSnapshot {
-  return { config: structuredClone(demoConfig), revision: revision(demoConfig), directory: '~/.config/bullet (浏览器演示)', warning: null };
+  return { config: structuredClone(demoConfig), revision: revision(demoConfig), diskRevision: revision(demoConfig), diskStatus: 'valid', directory: '~/.config/bullet (浏览器演示)', warning: null };
 }
 
 export async function loadConfig(): Promise<ConfigSnapshot> { return native ? invoke('load_config') : demoConfigSnapshot(); }
+// Only native deserialization owns the schema/defaults. This browser projection is for interaction preview.
+export async function parseConfig(json: string): Promise<Config> {
+  if (native) return invoke('parse_config', { json });
+  const value = JSON.parse(json);
+  if (!value || typeof value !== 'object' || typeof value.version !== 'number'
+    || !value.settings || typeof value.settings !== 'object' || !Array.isArray(value.actions)) {
+    throw new Error('JSON 需要 version、settings 对象和 actions 数组');
+  }
+  return { ...value, settings: { ...defaults.settings, ...value.settings }, actions: value.actions.map((action: Partial<Action>) => {
+    if (!action || typeof action.id !== 'string' || typeof action.name !== 'string' || !action.kind || !['cli', 'script', 'http'].includes(action.kind)) {
+      throw new Error('每个动作需要 id、name 和有效 kind');
+    }
+    return { enabled: true, program: '', args: [], cwd: null, env: {}, input: 'stdin', timeoutSec: null,
+      scriptExtension: 'py', http: null, ...action,
+      output: Object.assign({ mode: 'live', encoding: 'utf-8' }, action.output),
+      ...(action.http ? { http: Object.assign({ method: 'POST', headers: {}, body: null }, action.http,
+        { response: Object.assign({ format: 'text' }, action.http.response) }) } : {}) };
+  }) };
+}
+export async function restoreConfig(config: Config, diskRevision: string): Promise<ConfigSnapshot> {
+  if (native) return invoke('restore_config', { config, diskRevision });
+  throw new Error('浏览器演示不读取磁盘，也不提供文件恢复');
+}
 export async function saveConfig(config: Config, expected: string): Promise<ConfigSnapshot> {
   if (native) return invoke('save_config', { config, revision: expected });
   if (revision(demoConfig) !== expected) throw new Error('配置已变化，请重新载入');
   if (config.version !== 1 || !Array.isArray(config.actions)) throw new Error('配置格式无效');
   const ids = config.actions.map(a => a.id);
   if (new Set(ids).size !== ids.length) throw new Error('动作 ID 重复');
-  demoConfig = JSON.parse(JSON.stringify(config)); localStorage.setItem('bullet-demo-config', JSON.stringify(config)); return demoConfigSnapshot();
+  const next = await parseConfig(JSON.stringify(config));
+  localStorage.setItem('bullet-demo-config', JSON.stringify(next)); demoConfig = next; return demoConfigSnapshot();
 }
 export async function readScript(id: string, extension: string): Promise<ScriptSnapshot> {
   if (native) return invoke('read_script', { id, extension });
@@ -55,7 +83,13 @@ export async function startRun(actionId: string, text: string): Promise<string> 
     status: 'running', stage: '执行中', stdout: '', stderr: '', cwd: action.cwd || demoConfig.settings.defaultCwd,
     startedAt: Date.now(), finishedAt: null, error: null, exitCode: null, httpStatus: null,
     truncated: false, submissionUnknown: false, unread: false, outputMode: action.output.mode,
-    configRevision: revision(demoConfig), scriptRevision: null, seq: 0 };
+    configRevision: await demoTraceRevision(revision(demoConfig)), scriptRevision: null, seq: 0, traceTruncated: false,
+    trace: [{ at: Date.now(), step: '浏览器演示', detail: '仅模拟交互，不代表本机程序、路径解析或真实 HTTP 请求。' }] };
+  if (action.kind === 'script') {
+    const source = await readScript(action.id, action.scriptExtension);
+    run.scriptRevision = await demoTraceRevision(source.source);
+    run.trace.push({ at: Date.now(), step: '模拟脚本快照', detail: source.source });
+  }
   demoRuns.set(run.id, run);
   const result = actionId === 'show-cwd' ? 'C:\\Users\\you\n'
     : action.kind === 'http' ? '这是 HTTP 返回的演示结果。\n\n' + text
@@ -67,21 +101,32 @@ export async function startRun(actionId: string, text: string): Promise<string> 
     if (run.status !== 'running') { clearInterval(timer); return; }
     const delta = chunks[index++] ?? '';
     run.stdout += delta;
-    if (index >= chunks.length) { run.status = 'succeeded'; run.stage = '已完成'; run.finishedAt = Date.now(); run.unread = true; run.exitCode = 0; clearInterval(timer); }
-    publishDemo(run, delta);
+    const traceDelta: TraceEntry[] = [];
+    if (index >= chunks.length) {
+      run.status = 'succeeded'; run.stage = '已完成'; run.finishedAt = Date.now(); run.unread = true; run.exitCode = 0;
+      traceDelta.push({ at: Date.now(), step: '模拟完成', detail: '演示结果已返回。' });
+      run.trace.push(...traceDelta); clearInterval(timer);
+    }
+    publishDemo(run, delta, traceDelta);
   }, 260);
   return run.id;
 }
-function publishDemo(run: RunSnapshot, stdoutDelta = ''): void {
+function publishDemo(run: RunSnapshot, stdoutDelta = '', traceDelta: TraceEntry[] = []): void {
   run.seq += 1;
   demoSubscriptions.get(run.id)?.({ type: 'update', runId: run.id, seq: run.seq, stdoutDelta, stderrDelta: '',
     status: run.status, stage: run.stage, error: run.error, exitCode: run.exitCode,
-    httpStatus: run.httpStatus, finishedAt: run.finishedAt, truncated: false, submissionUnknown: false });
+    httpStatus: run.httpStatus, finishedAt: run.finishedAt, truncated: false, submissionUnknown: false,
+    traceDelta, traceTruncated: run.traceTruncated });
 }
 export async function attachRun(runId: string, onEvent: (event: RunEvent) => void): Promise<void> {
   if (native) { const channel = new Channel<RunEvent>(); channel.onmessage = onEvent; await invoke('attach_run', { runId, channel }); return; }
   const run = demoRuns.get(runId); if (!run) throw new Error('任务不存在');
-  run.unread = false; onEvent({ type: 'snapshot', run: structuredClone(run) }); demoSubscriptions.set(runId, onEvent);
+  onEvent({ type: 'snapshot', run: structuredClone(run) }); demoSubscriptions.set(runId, onEvent);
+}
+export async function markRunRead(runId: string): Promise<void> {
+  if (native) { await invoke('mark_run_read', { runId }); return; }
+  const run = demoRuns.get(runId);
+  if (run && run.status !== 'running') run.unread = false;
 }
 export async function detachRun(runId: string): Promise<void> { if (native) await invoke('detach_run', { runId }); else demoSubscriptions.delete(runId); }
 export async function cancelRun(runId: string): Promise<void> {
@@ -106,6 +151,11 @@ export async function showRun(runId: string): Promise<void> {
 export async function resolveCwd(defaultCwd: string, cwd: string | null): Promise<string> {
   if (native) return invoke('resolve_action_cwd', { defaultCwd, cwd });
   return cwd || defaultCwd;
+}
+export async function confirmAction(message: string): Promise<boolean> {
+  if (!native) return window.confirm(message);
+  const { confirm } = await import('@tauri-apps/plugin-dialog');
+  return confirm(message, { title: 'bullet · 确认操作', kind: 'warning' });
 }
 export async function chooseDirectory(): Promise<string | null> {
   if (!native) return window.prompt('输入工作目录', 'C:\\Users\\you');
