@@ -1,7 +1,12 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import * as bridge from '../lib/bridge';
-  import { applyRunEvent, statusLabels, type Action, type RunSnapshot, type RunSummary } from '../lib/types';
+  import { applyRunEvent, hasUnreadResult, statusLabels, type Action, type RunSnapshot, type RunSummary } from '../lib/types';
+  import RunTrace from './RunTrace.svelte';
+
+  let { visible = true }: { visible?: boolean } = $props();
+  let panelOpen = $state(!bridge.native);
+  let acknowledgedRun: string | null = null;
 
   let actions = $state<Action[]>([]);
   let selected = $state('');
@@ -11,6 +16,7 @@
   let menu = $state(false);
   let submitting = $state(false);
   let error = $state('');
+  let readError = $state('');
   let copied = $state(false);
   let logs = $state(false);
   let textarea: HTMLTextAreaElement;
@@ -19,8 +25,7 @@
   let attachmentGeneration = 0;
   let lastHeight = 0;
   let action = $derived(actions.find(value => value.id === selected));
-  let activeCount = $derived(runs.filter(value => value.status === 'running').length);
-  let unreadCount = $derived(runs.filter(value => value.unread && value.id !== run?.id).length);
+  let unread = $derived(runs.some(hasUnreadResult));
   let outputVisible = $derived(run && (run.outputMode === 'live' || run.status !== 'running'));
 
   async function refresh() {
@@ -34,16 +39,43 @@
   }
   async function attach(id: string) {
     const generation = ++attachmentGeneration;
-    run = null; logs = false; followOutput = true;
+    acknowledgedRun = null;
+    run = null; logs = false; readError = ''; followOutput = true;
     try {
       await bridge.attachRun(id, async event => {
         if (generation !== attachmentGeneration) return;
         try { run = applyRunEvent(run, event); } catch (failure) { error = String(failure); return; }
         if (event.type === 'snapshot') text = event.run.input;
         await tick();
+        void acknowledgeVisibleResult();
         if (followOutput && resultElement) resultElement.scrollTop = resultElement.scrollHeight;
       });
     } catch (failure) { error = String(failure); }
+  }
+  async function acknowledgeVisibleResult() {
+    await tick();
+    if (!run || (run.status !== 'succeeded' && run.status !== 'failed') || !visible || !panelOpen
+      || document.visibilityState !== 'visible' || !document.hasFocus() || acknowledgedRun === run.id) return;
+    const id = run.id;
+    const generation = attachmentGeneration;
+    acknowledgedRun = id;
+    try {
+      await bridge.markRunRead(id);
+    } catch (failure) {
+      if (generation !== attachmentGeneration || run?.id !== id) return;
+      if (acknowledgedRun === id) acknowledgedRun = null;
+      readError = `标记结果已查看失败：${String(failure)}`;
+      return;
+    }
+    if (generation !== attachmentGeneration || run?.id !== id) return;
+    readError = '';
+    run = { ...run, unread: false };
+    try {
+      const summaries = await bridge.listRuns();
+      if (generation === attachmentGeneration) runs = summaries;
+    } catch (failure) {
+      if (generation === attachmentGeneration) readError = `结果已标记查看，但任务列表刷新失败：${String(failure)}`;
+    }
   }
   async function send() {
     if (submitting || run?.status === 'running' || !selected || !text.trim()) return;
@@ -54,7 +86,7 @@
   }
   async function detach() {
     if (run) await bridge.detachRun(run.id);
-    attachmentGeneration++; run = null; text = ''; error = ''; logs = false; menu = false;
+    attachmentGeneration++; run = null; text = ''; error = ''; readError = ''; logs = false; menu = false;
     await tick(); textarea?.focus(); await refresh();
   }
   async function collapse() { menu = false; await bridge.shell('collapse_panel'); }
@@ -73,10 +105,11 @@
   async function resize() {
     await tick();
     if (textarea) { textarea.style.height = 'auto'; textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight, 32), 112)}px`; }
-    const height = Math.max(116, (textarea?.offsetHeight ?? 32) + 80 + (run ? 306 + (logs ? 120 : 0) : 0) + (error ? 60 : 0) + (menu ? Math.min(actions.length * 42 + 58, 258) : 0));
+    const height = Math.max(116, (textarea?.offsetHeight ?? 32) + 80 + (run ? 306 + (logs ? 180 : 0) : 0) + (error ? 60 : 0) + (readError ? 60 : 0) + (menu ? Math.min(actions.length * 42 + 58, 258) : 0));
     if (height !== lastHeight) { lastHeight = height; await bridge.shell('resize_panel', { height }); }
   }
-  $effect(() => { void text; void run?.status; void logs; void menu; void error; void actions.length; void resize(); });
+  $effect(() => { if (visible) void acknowledgeVisibleResult(); });
+  $effect(() => { void text; void run?.status; void logs; void menu; void error; void readError; void actions.length; void resize(); });
   onMount(() => {
     const cleanup: (() => void)[] = [];
     let disposed = false;
@@ -85,14 +118,15 @@
     }
     void refresh();
     void bind('show-run', payload => { void attach(String(payload)); });
-    void bind('panel-opened', () => { lastHeight = 0; void refresh(); void resize(); textarea?.focus(); });
-    void bind('panel-collapsed', () => { menu = false; if (run && run.status !== 'running') void detach(); });
+    void bind('panel-opened', () => { panelOpen = true; lastHeight = 0; void refresh(); void resize(); textarea?.focus(); void acknowledgeVisibleResult(); });
+    void bind('panel-collapsed', () => { panelOpen = false; menu = false; if (run && run.status !== 'running') void detach(); });
     const timer = setInterval(() => { void bridge.listRuns().then(value => runs = value).catch(() => {}); }, 1000);
     return () => { disposed = true; clearInterval(timer); cleanup.forEach(off => off()); };
   });
 </script>
 
-<svelte:window onkeydown={keydown} />
+<svelte:window onkeydown={keydown} onfocus={() => void acknowledgeVisibleResult()} />
+<svelte:document onvisibilitychange={() => void acknowledgeVisibleResult()} />
 <div class="panel-layout">
   <section class="input-card" aria-label="快速输入">
     <div class="composer">
@@ -102,7 +136,7 @@
     <div class="composer-footer">
       <button class="action-select" aria-expanded={menu} onclick={() => menu = !menu}>{action?.name ?? '配置一个动作'} <span class="chevron">⌄</span></button>
       <div class="quiet-controls">
-        {#if runs.length}<button class="quiet" onclick={() => bridge.shell('open_management', {route:'tasks'})}>任务 {activeCount || runs.length}{#if unreadCount}<span class="notification-dot"></span>{/if}</button>{/if}
+        <button class="quiet" aria-label={unread ? '任务：有未查看结果' : '任务'} onclick={() => bridge.shell('open_management', {route:'tasks'})}>任务{#if unread}<span class="notification-dot"></span>{/if}</button>
         <button class="icon-button" title="配置动作" aria-label="配置动作" onclick={() => bridge.shell('open_management', {route:'settings'})}>⋯</button>
       </div>
     </div>
@@ -120,10 +154,11 @@
         {#if run.submissionUnknown}<p class="inline-error">未能确认提交结果，请核对目标内容后再决定是否重新执行。</p>{/if}
         {#if run.truncated}<p class="muted">输出超过容量限制，已截断。</p>{/if}
       </div>
-      <div class="result-footer"><button class="quiet" disabled={!run.stdout || !outputVisible} onclick={copy}>{copied ? '已复制 ✓' : '复制结果'}</button><button class="quiet" onclick={() => logs = !logs}>{logs ? '收起详情' : '详情'}</button><span class="grow"></span><span class="shortcut">Esc 收起</span></div>
-      {#if logs}<div class="run-details"><div>cwd · {run.cwd ?? 'HTTP 请求'}</div><div>退出码 · {run.exitCode ?? '—'}　HTTP · {run.httpStatus ?? '—'}</div><pre>{run.stderr || '没有日志'}</pre></div>{/if}
+      <div class="result-footer"><button class="quiet" disabled={!run.stdout || !outputVisible} onclick={copy}>{copied ? '已复制 ✓' : '复制结果'}</button><button class="quiet" aria-expanded={logs} onclick={() => logs = !logs}>{logs ? '收起 trace' : '运行 trace'}</button><span class="grow"></span><span class="shortcut">Esc 收起</span></div>
+      {#if logs}<div class="run-details"><div>cwd · {run.cwd ?? '—'}</div><div>退出码 · {run.exitCode ?? '—'}　HTTP · {run.httpStatus ?? '—'}</div><RunTrace {run} /><details><summary>stderr 日志</summary><pre>{run.stderr || '没有日志'}</pre></details></div>{/if}
     {/if}
     {#if error}<p class="panel-error" role="alert">{error}</p>{/if}
+    {#if readError}<p class="panel-error" role="alert">{readError}</p>{/if}
   </section>
   {#if menu}
     <div class="action-menu" role="group" aria-label="选择动作">

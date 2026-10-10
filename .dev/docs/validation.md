@@ -8,7 +8,25 @@ scope:
 updated: 2026-10-11
 ---
 
-# 配置编辑重构验证（2026-10-11）
+# 运行 trace 与结果未读验证（2026-10-11）
+
+本轮环境仍为 Windows/MSYS（Node.js 24.14、Rust 1.95），Edge 无头交互。使用独立临时配置、冻结源码和本机回环 HTTP 服务；没有访问个人配置、鉴权或外部服务。
+
+| 检查 | 结果 | 能确认的范围 |
+| --- | --- | --- |
+| `npm run check` | 0 errors、0 warnings | 类型与 Svelte 模板 |
+| `npm test` | 16 tests passed | 既有配置会话、任务增量，以及 trace 顺序/重复/旧快照和未读终态规则 |
+| `npm run test:ui` | 三个脚本通过 | 既有界面、配置恢复模拟 IPC；新 trace 展示、源码/参数/截断、隐藏订阅不确认、列表不算已读、前台确认、迟到确认不影响另一任务、模拟版本不泄露完整配置 |
+| `npm run build` | 通过 | 前端生产构建 |
+| `cargo test --manifest-path src-tauri/Cargo.toml --no-default-features` | 43 tests passed | 同步冻结与首个快照、准备失败历史、实际插值、HTTP 头脱敏、容量与 UTF-8、旧历史、只读/占用下已读失败及重试、原配置/执行测试 |
+| `cargo check --manifest-path src-tauri/Cargo.toml` | 通过 | Windows 桌面入口、Channel、显式已读 IPC 的编译检查 |
+| `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check` / `git diff --check` | 通过 | 格式与空白；被修改的执行文件同步格式化 |
+
+前端与后端分别经过独立只读审查。发现的迟到已读响应、浏览器版本明文、准备阶段冻结时序、遗漏 cwd、截断标记及已读保存错误均已修复并补测试。浏览器原生 IPC 案例仍是模拟，不确认真实 WebView 隐藏/焦点事件；本轮 Rust 测试实际运行隔离的 cmd/PowerShell 子进程与回环 HTTP，但不代替安装后通知、进程树和窗口的手工验收。原 execution 测试的 Windows unused-import warning 保留。
+
+Trace 示例截图位于忽略的 `tmp/run-trace/failed-trace.png`，使用合成数据。原生 Esc/焦点/重启验收步骤见 [windows-validation.md](windows-validation.md)。
+
+# 配置编辑重构验证（2026-10-11，历史记录）
 
 本轮环境为 Windows/MSYS，Node.js 24.14、Rust 1.95，浏览器交互使用本机 Edge 的无头模式。没有启动读取个人配置的桌面应用，没有生成安装包。
 

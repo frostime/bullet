@@ -40,7 +40,7 @@ try {
   await sidebarAction.click();
   assert.equal(await page.getByRole('textbox',{name:'脚本源码'}).inputValue(),'print("unsaved source")');
   await page.getByLabel('名称',{exact:true}).fill('未保存的动作名称');
-  await page.getByRole('button',{name:'任务',exact:true}).click();
+  await page.locator('.management-nav').getByRole('button',{name:'任务',exact:true}).click();
   await page.getByRole('button',{name:'动作',exact:true}).click();
   assert.equal(await page.getByLabel('名称',{exact:true}).inputValue(),'未保存的动作名称');
   assert.equal(await page.getByRole('textbox',{name:'脚本源码'}).inputValue(),'print("unsaved source")');
@@ -77,7 +77,7 @@ try {
   assert.equal(await page.getByLabel('动作类型',{exact:true}).inputValue(),'script');
   await argsField.fill(validArgs);
   await page.screenshot({path:'tmp/ui-smoke/settings.png'});
-  await page.getByRole('button',{name:'任务',exact:true}).click();
+  await page.locator('.management-nav').getByRole('button',{name:'任务',exact:true}).click();
   assert.equal(await page.locator('.task-row').count(),2);
   await page.screenshot({path:'tmp/ui-smoke/tasks.png'});
   await page.getByRole('button',{name:'返回桌面 ↗',exact:true}).click();

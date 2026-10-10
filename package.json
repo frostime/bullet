@@ -8,7 +8,7 @@
     "preview": "vite preview --host 127.0.0.1",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "test:ui": "node scripts/ui-smoke.mjs && node scripts/config-ipc-ui.mjs",
+    "test:ui": "node scripts/ui-smoke.mjs && node scripts/config-ipc-ui.mjs && node scripts/run-trace-ui.mjs",
     "tauri": "tauri",
     "desktop": "tauri dev",
     "desktop:build": "tauri build"

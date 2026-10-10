@@ -87,6 +87,12 @@ fn attach_run(
         .runs
         .subscribe(&run_id, Arc::new(move |event| channel.send(event).is_ok()))
 }
+/// 已读确认只见前端在真正看到结果后调用；后端只对终态任务生效并持久化。
+/// 保存失败返回错误，由界面报告并允许显式重试。
+#[tauri::command]
+fn mark_run_read(state: State<AppState>, run_id: String) -> Result<(), String> {
+    state.runs.mark_read(&run_id)
+}
 #[tauri::command]
 fn cancel_run(state: State<AppState>, run_id: String) -> Result<(), String> {
     state.runs.cancel(&run_id)
@@ -171,6 +177,7 @@ pub fn run() {
             start_run,
             attach_run,
             cancel_run,
+            mark_run_read,
             detach_run,
             list_runs,
             clear_history,
@@ -194,11 +201,9 @@ pub fn run() {
                     let Some(state) = notification_app.try_state::<AppState>() else {
                         return;
                     };
+                    // 未读改由前端在真正渲染终态后显式确认；这里只保留基于焦点的通知抑制。
                     let foreground = state.runs.foreground().as_deref() == Some(&run.id)
                         && state.shell.is_foreground();
-                    if foreground {
-                        state.runs.mark_read(&run.id);
-                    }
                     if run.status == RunStatus::Cancelled
                         || mode == NotificationMode::Off
                         || (mode == NotificationMode::Background && foreground)

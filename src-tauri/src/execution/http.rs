@@ -1,6 +1,6 @@
 use super::{
     output::{extract_json, RecordParser, TextDecoder},
-    substitute_input, ExecutionFailure, ExecutionResult, PreparedAction, RunManager,
+    substitute_input, trace, ExecutionFailure, ExecutionResult, PreparedAction, RunManager,
 };
 use crate::config::model::ResponseFormat;
 use futures_util::StreamExt;
@@ -24,15 +24,37 @@ pub async fn execute(
         .map_err(|error| ExecutionFailure::from(error.to_string()))?;
     let method = reqwest::Method::from_bytes(config.method.as_bytes())
         .map_err(|error| ExecutionFailure::from(error.to_string()))?;
+    manager.trace(
+        id,
+        "http_request",
+        format!("方法 {} · 目标 {}", method, config.url),
+    );
     let mut request = client.request(method.clone(), &config.url);
+    // 逐头展开；摘要走脱敏规则，展开出的密钥不进入 trace 或任何持久化。
+    let mut header_lines = Vec::new();
     for (name, value) in &config.headers {
-        request = request.header(
-            name,
-            expand_environment(value).map_err(ExecutionFailure::from)?,
-        );
+        match expand_environment(value) {
+            Ok(resolved) => {
+                request = request.header(name, resolved.as_str());
+                header_lines.push(trace::header_summary(name, Some(&resolved), value));
+            }
+            Err(error) => {
+                header_lines.push(format!("{name}: 展开失败：{error}"));
+                manager.trace(id, "http_headers", header_lines.join("\n"));
+                return Err(ExecutionFailure::from(error));
+            }
+        }
     }
+    manager.trace(id, "http_headers", header_lines.join("\n"));
     if let Some(body) = &config.body {
-        request = request.json(&render_body(body, &prepared.input));
+        let rendered = render_body(body, &prepared.input);
+        manager.trace_bounded(
+            id,
+            "http_body",
+            &rendered.to_string(),
+            trace::HTTP_BODY_LIMIT,
+        );
+        request = request.json(&rendered);
     }
     manager.stage(id, "请求已发起");
     let response = request.send().await.map_err(|error| ExecutionFailure {
@@ -79,6 +101,7 @@ pub async fn execute(
                 for record in parser.push(&text, eof).map_err(ExecutionFailure::from)? {
                     if config.response.done_marker.as_deref() == Some(record.as_str()) {
                         saw_done = true;
+                        manager.trace(id, "done_marker", format!("收到完成标记 {record}"));
                         break;
                     }
                     if let Some(pointer) = &config.response.pointer {
@@ -103,8 +126,24 @@ pub async fn execute(
     if config.response.format == ResponseFormat::Json {
         let value: Value = serde_json::from_str(&document)
             .map_err(|error| ExecutionFailure::from(format!("JSON 解析失败：{error}")))?;
+        manager.trace(
+            id,
+            "json_parse",
+            format!("JSON 解析成功，{} 字节", document.len()),
+        );
         if let Some(rule) = &config.response.success {
-            if value.pointer(&rule.pointer) != Some(&rule.equals) {
+            let satisfied = value.pointer(&rule.pointer) == Some(&rule.equals);
+            manager.trace(
+                id,
+                "condition",
+                format!(
+                    "业务条件 {} == {}：{}",
+                    rule.pointer,
+                    rule.equals,
+                    if satisfied { "满足" } else { "不满足" }
+                ),
+            );
+            if !satisfied {
                 manager.append(id, false, &document, limit);
                 return Err("服务器业务成功条件不满足，请检查返回结果"
                     .to_string()

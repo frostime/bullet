@@ -37,6 +37,13 @@ pub async fn execute(
         ))
     })?;
     let _tree = ProcessTree::attach(&child).map_err(ExecutionFailure::from)?;
+    if let Some(pid) = child.id() {
+        manager.trace(
+            id,
+            "spawn",
+            format!("PID {pid}；stdout/stderr 双管道保持排空直到退出"),
+        );
+    }
     let mut stdin = child.stdin.take().unwrap();
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
@@ -73,6 +80,17 @@ pub async fn execute(
         child.wait(),
     );
     let status = status.map_err(|error| ExecutionFailure::from(error.to_string()))?;
+    manager.trace(
+        id,
+        "stdin",
+        match prepared.action.input {
+            InputMode::Stdin => match &input_result {
+                Ok(()) => format!("stdin 写入 {} 字节", prepared.input.len()),
+                Err(error) => format!("stdin 写入失败：{error}"),
+            },
+            InputMode::Args => "输入经命令行参数传递".into(),
+        },
+    );
     manager.record_exit(id, status.code());
     stdout_result.map_err(ExecutionFailure::from)?;
     stderr_result.map_err(ExecutionFailure::from)?;

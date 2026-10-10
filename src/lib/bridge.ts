@@ -2,7 +2,7 @@ import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import defaults from '../../src-tauri/defaults.json';
-import type { Action, Config, ConfigSnapshot, RunEvent, RunSnapshot, RunSummary, ScriptSnapshot } from './types';
+import type { Action, Config, ConfigSnapshot, RunEvent, RunSnapshot, RunSummary, ScriptSnapshot, TraceEntry } from './types';
 
 export const native = isTauri();
 export const demoEvents = new EventTarget();
@@ -18,6 +18,10 @@ function loadDemoConfig(): Config {
   return JSON.parse(JSON.stringify(defaults));
 }
 function revision(value: unknown): string { return JSON.stringify(value); }
+async function demoTraceRevision(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return 'demo-sha256:' + Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
 function demoConfigSnapshot(): ConfigSnapshot {
   return { config: structuredClone(demoConfig), revision: revision(demoConfig), diskRevision: revision(demoConfig), diskStatus: 'valid', directory: '~/.config/bullet (浏览器演示)', warning: null };
 }
@@ -79,7 +83,13 @@ export async function startRun(actionId: string, text: string): Promise<string> 
     status: 'running', stage: '执行中', stdout: '', stderr: '', cwd: action.cwd || demoConfig.settings.defaultCwd,
     startedAt: Date.now(), finishedAt: null, error: null, exitCode: null, httpStatus: null,
     truncated: false, submissionUnknown: false, unread: false, outputMode: action.output.mode,
-    configRevision: revision(demoConfig), scriptRevision: null, seq: 0 };
+    configRevision: await demoTraceRevision(revision(demoConfig)), scriptRevision: null, seq: 0, traceTruncated: false,
+    trace: [{ at: Date.now(), step: '浏览器演示', detail: '仅模拟交互，不代表本机程序、路径解析或真实 HTTP 请求。' }] };
+  if (action.kind === 'script') {
+    const source = await readScript(action.id, action.scriptExtension);
+    run.scriptRevision = await demoTraceRevision(source.source);
+    run.trace.push({ at: Date.now(), step: '模拟脚本快照', detail: source.source });
+  }
   demoRuns.set(run.id, run);
   const result = actionId === 'show-cwd' ? 'C:\\Users\\you\n'
     : action.kind === 'http' ? '这是 HTTP 返回的演示结果。\n\n' + text
@@ -91,21 +101,32 @@ export async function startRun(actionId: string, text: string): Promise<string> 
     if (run.status !== 'running') { clearInterval(timer); return; }
     const delta = chunks[index++] ?? '';
     run.stdout += delta;
-    if (index >= chunks.length) { run.status = 'succeeded'; run.stage = '已完成'; run.finishedAt = Date.now(); run.unread = true; run.exitCode = 0; clearInterval(timer); }
-    publishDemo(run, delta);
+    const traceDelta: TraceEntry[] = [];
+    if (index >= chunks.length) {
+      run.status = 'succeeded'; run.stage = '已完成'; run.finishedAt = Date.now(); run.unread = true; run.exitCode = 0;
+      traceDelta.push({ at: Date.now(), step: '模拟完成', detail: '演示结果已返回。' });
+      run.trace.push(...traceDelta); clearInterval(timer);
+    }
+    publishDemo(run, delta, traceDelta);
   }, 260);
   return run.id;
 }
-function publishDemo(run: RunSnapshot, stdoutDelta = ''): void {
+function publishDemo(run: RunSnapshot, stdoutDelta = '', traceDelta: TraceEntry[] = []): void {
   run.seq += 1;
   demoSubscriptions.get(run.id)?.({ type: 'update', runId: run.id, seq: run.seq, stdoutDelta, stderrDelta: '',
     status: run.status, stage: run.stage, error: run.error, exitCode: run.exitCode,
-    httpStatus: run.httpStatus, finishedAt: run.finishedAt, truncated: false, submissionUnknown: false });
+    httpStatus: run.httpStatus, finishedAt: run.finishedAt, truncated: false, submissionUnknown: false,
+    traceDelta, traceTruncated: run.traceTruncated });
 }
 export async function attachRun(runId: string, onEvent: (event: RunEvent) => void): Promise<void> {
   if (native) { const channel = new Channel<RunEvent>(); channel.onmessage = onEvent; await invoke('attach_run', { runId, channel }); return; }
   const run = demoRuns.get(runId); if (!run) throw new Error('任务不存在');
-  run.unread = false; onEvent({ type: 'snapshot', run: structuredClone(run) }); demoSubscriptions.set(runId, onEvent);
+  onEvent({ type: 'snapshot', run: structuredClone(run) }); demoSubscriptions.set(runId, onEvent);
+}
+export async function markRunRead(runId: string): Promise<void> {
+  if (native) { await invoke('mark_run_read', { runId }); return; }
+  const run = demoRuns.get(runId);
+  if (run && run.status !== 'running') run.unread = false;
 }
 export async function detachRun(runId: string): Promise<void> { if (native) await invoke('detach_run', { runId }); else demoSubscriptions.delete(runId); }
 export async function cancelRun(runId: string): Promise<void> {
