@@ -21,6 +21,7 @@ pub const MAX_ACTIVE_RUNS: usize = 16;
 const MAX_INPUT_BYTES: usize = 1_048_576;
 const MAX_LOG_BYTES: usize = 262_144;
 
+const INPUT_PLACEHOLDER_PREFIX: &str = "{{input";
 const INPUT_PLACEHOLDER: &str = "{{input}}";
 const INPUT_INLINE_PLACEHOLDER: &str = "{{input-inline}}";
 
@@ -29,7 +30,7 @@ const INPUT_INLINE_PLACEHOLDER: &str = "{{input-inline}}";
 /// `{{input}}` inserts the raw text; `{{input-inline}}` inserts its JSON string
 /// body without quote marks, intended for a string that is itself JSON.
 pub fn substitute_input(text: &str, input: &str) -> String {
-    if !text.contains("{{input") {
+    if !text.contains(INPUT_PLACEHOLDER_PREFIX) {
         return text.to_owned();
     }
     let inline = escape_json_inline(input);
@@ -57,16 +58,22 @@ fn escape_json_inline(input: &str) -> String {
     encoded
 }
 
-/// Both tokens share the `{{input` prefix but diverge right after, so the
-/// earliest match identifies the token; a shorter find never hides the other.
+/// Scan the shared prefix so an absent token does not trigger repeated searches
+/// of the entire remaining template.
 fn next_input_placeholder(text: &str) -> Option<(usize, &'static str)> {
-    match (text.find(INPUT_PLACEHOLDER), text.find(INPUT_INLINE_PLACEHOLDER)) {
-        (Some(plain), Some(inline)) if plain < inline => Some((plain, INPUT_PLACEHOLDER)),
-        (Some(_), Some(inline)) => Some((inline, INPUT_INLINE_PLACEHOLDER)),
-        (Some(plain), None) => Some((plain, INPUT_PLACEHOLDER)),
-        (None, Some(inline)) => Some((inline, INPUT_INLINE_PLACEHOLDER)),
-        (None, None) => None,
+    let mut offset = 0;
+    while let Some(start) = text[offset..].find(INPUT_PLACEHOLDER_PREFIX) {
+        let start = offset + start;
+        let candidate = &text[start..];
+        if candidate.starts_with(INPUT_PLACEHOLDER) {
+            return Some((start, INPUT_PLACEHOLDER));
+        }
+        if candidate.starts_with(INPUT_INLINE_PLACEHOLDER) {
+            return Some((start, INPUT_INLINE_PLACEHOLDER));
+        }
+        offset = start + INPUT_PLACEHOLDER_PREFIX.len();
     }
+    None
 }
 
 #[cfg(test)]
@@ -99,6 +106,14 @@ mod input_substitution_tests {
     fn input_content_is_never_rescanned() {
         assert_eq!(substitute_input("{{input}}", "{{input-inline}}"), "{{input-inline}}");
         assert_eq!(substitute_input("{{input-inline}}", "x{{input}}"), "x{{input}}");
+    }
+
+    #[test]
+    fn unrecognized_prefixes_do_not_hide_later_placeholders() {
+        assert_eq!(
+            substitute_input("中文{{input-x}}/{{input{{input-inline}}/{{input}}/{{input", "a\"b"),
+            "中文{{input-x}}/{{inputa\\\"b/a\"b/{{input"
+        );
     }
 
     #[test]
