@@ -21,6 +21,92 @@ pub const MAX_ACTIVE_RUNS: usize = 16;
 const MAX_INPUT_BYTES: usize = 1_048_576;
 const MAX_LOG_BYTES: usize = 262_144;
 
+const INPUT_PLACEHOLDER: &str = "{{input}}";
+const INPUT_INLINE_PLACEHOLDER: &str = "{{input-inline}}";
+
+/// Substitute input placeholders in one scan; inserted text is never rescanned,
+/// so input containing literal placeholder text cannot recurse.
+/// `{{input}}` inserts the raw text; `{{input-inline}}` inserts its JSON string
+/// body without quote marks, intended for a string that is itself JSON.
+pub fn substitute_input(text: &str, input: &str) -> String {
+    if !text.contains("{{input") {
+        return text.to_owned();
+    }
+    let inline = escape_json_inline(input);
+    let mut result = String::with_capacity(text.len() + input.len() * 4);
+    let mut rest = text;
+    while let Some((start, token)) = next_input_placeholder(rest) {
+        result.push_str(&rest[..start]);
+        if token == INPUT_PLACEHOLDER {
+            result.push_str(input);
+        } else {
+            result.push_str(&inline);
+        }
+        rest = &rest[start + token.len()..];
+    }
+    result.push_str(rest);
+    result
+}
+
+/// Input text as a JSON string body without the surrounding quotes.
+fn escape_json_inline(input: &str) -> String {
+    let mut encoded = serde_json::to_string(input).expect("字符串总能序列化为 JSON");
+    // serde_json 的首尾引号均为 ASCII 字节，remove 不会切开多字符边界
+    encoded.remove(encoded.len() - 1);
+    encoded.remove(0);
+    encoded
+}
+
+/// Both tokens share the `{{input` prefix but diverge right after, so the
+/// earliest match identifies the token; a shorter find never hides the other.
+fn next_input_placeholder(text: &str) -> Option<(usize, &'static str)> {
+    match (text.find(INPUT_PLACEHOLDER), text.find(INPUT_INLINE_PLACEHOLDER)) {
+        (Some(plain), Some(inline)) if plain < inline => Some((plain, INPUT_PLACEHOLDER)),
+        (Some(_), Some(inline)) => Some((inline, INPUT_INLINE_PLACEHOLDER)),
+        (Some(plain), None) => Some((plain, INPUT_PLACEHOLDER)),
+        (None, Some(inline)) => Some((inline, INPUT_INLINE_PLACEHOLDER)),
+        (None, None) => None,
+    }
+}
+
+#[cfg(test)]
+mod input_substitution_tests {
+    use super::*;
+
+    #[test]
+    fn plain_placeholder_repeats_for_every_occurrence() {
+        assert_eq!(substitute_input("[{{input}}]", "abc"), "[abc]");
+        assert_eq!(substitute_input("a{{input}}b{{input}}c", "x"), "axbxc");
+        assert_eq!(substitute_input("untouched", "x"), "untouched");
+    }
+
+    #[test]
+    fn inline_placeholder_uses_json_string_escaping() {
+        assert_eq!(substitute_input("{{input-inline}}", "a\"b\nc"), "a\\\"b\\nc");
+        assert_eq!(substitute_input("{{input-inline}}", ""), "");
+        assert_eq!(substitute_input("{{input-inline}}", "中文"), "中文");
+    }
+
+    #[test]
+    fn mixed_placeholders_keep_their_own_forms() {
+        assert_eq!(
+            substitute_input("{{input}}//{{input-inline}}", "a\""),
+            "a\"//a\\\""
+        );
+    }
+
+    #[test]
+    fn input_content_is_never_rescanned() {
+        assert_eq!(substitute_input("{{input}}", "{{input-inline}}"), "{{input-inline}}");
+        assert_eq!(substitute_input("{{input-inline}}", "x{{input}}"), "x{{input}}");
+    }
+
+    #[test]
+    fn partial_brace_sequences_stay_untouched() {
+        assert_eq!(substitute_input("{{input-inl}} {{input-x}}", "y"), "{{input-inl}} {{input-x}}");
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RunStatus {
@@ -221,7 +307,7 @@ impl RunManager {
                         .map(|p| p.to_string_lossy().into_owned())
                         .unwrap_or_default()
                 } else if action.input == crate::config::model::InputMode::Args {
-                    arg.replace("{{input}}", &input)
+                    substitute_input(arg, &input)
                 } else {
                     arg.clone()
                 }

@@ -1,6 +1,6 @@
 use super::{
     output::{extract_json, RecordParser, TextDecoder},
-    ExecutionFailure, ExecutionResult, PreparedAction, RunManager,
+    substitute_input, ExecutionFailure, ExecutionResult, PreparedAction, RunManager,
 };
 use crate::config::model::ResponseFormat;
 use futures_util::StreamExt;
@@ -138,10 +138,11 @@ pub async fn execute(
     })
 }
 
-/// Replace text inside parsed JSON values, never by concatenating a raw JSON document.
+/// Substitute input placeholders inside parsed JSON values, never by concatenating
+/// a raw JSON document.
 pub fn render_body(value: &Value, input: &str) -> Value {
     match value {
-        Value::String(text) => Value::String(text.replace("{{input}}", input)),
+        Value::String(text) => Value::String(substitute_input(text, input)),
         Value::Array(items) => {
             Value::Array(items.iter().map(|item| render_body(item, input)).collect())
         }
@@ -182,5 +183,34 @@ mod tests {
         let roundtrip: Value = serde_json::from_str(&rendered.to_string()).unwrap();
         assert_eq!(roundtrip["data"], input);
         assert_eq!(roundtrip["number"], 1);
+    }
+
+    /// `{{input-inline}}` lands inside a string that is itself JSON; after
+    /// replacement the inner document must re-parse and keep the input intact.
+    #[test]
+    fn input_inline_keeps_inner_json_parseable() {
+        let body = serde_json::json!({"val": "{\"a\": \"{{input-inline}}\"}"});
+        let input = "he said \"hi\"\n中文";
+        let rendered = render_body(&body, input);
+        let inner: Value = serde_json::from_str(rendered["val"].as_str().unwrap()).unwrap();
+        assert_eq!(inner["a"], input);
+    }
+
+    #[test]
+    fn mixed_placeholders_render_each_in_its_own_form() {
+        let body = serde_json::json!({"raw": "{{input}}", "inline": "{{input-inline}}"});
+        let input = "a\"b";
+        let rendered = render_body(&body, input);
+        assert_eq!(rendered["raw"], input);
+        assert_eq!(rendered["inline"], "a\\\"b");
+    }
+
+    /// Input containing a literal placeholder token must stay verbatim, never
+    /// re-expanded by a scan of the inserted text.
+    #[test]
+    fn input_content_is_never_rescanned() {
+        let body = serde_json::json!({"text": "before {{input}} after"});
+        let rendered = render_body(&body, "{{input-inline}}");
+        assert_eq!(rendered["text"], "before {{input-inline}} after");
     }
 }

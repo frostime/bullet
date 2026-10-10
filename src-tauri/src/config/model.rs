@@ -209,10 +209,17 @@ impl Config {
                 if action.program.trim().is_empty() {
                     return Err(format!("{}：程序不能为空", action.name));
                 }
+                let takes_input = ["{{input}}", "{{input-inline}}"];
                 if action.input == InputMode::Args
-                    && !action.args.iter().any(|arg| arg.contains("{{input}}"))
+                    && !action
+                        .args
+                        .iter()
+                        .any(|arg| takes_input.iter().any(|token| arg.contains(token)))
                 {
-                    return Err(format!("{}：参数输入模式需要 {{{{input}}}}", action.name));
+                    return Err(format!(
+                        "{}：参数输入模式需要 {{{{input}}}} 或 {{{{input-inline}}}}",
+                        action.name
+                    ));
                 }
             } else {
                 let http = action.http.as_ref().ok_or("HTTP 动作缺少 http 配置")?;

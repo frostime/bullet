@@ -13,6 +13,7 @@
 - 程序名允许直接配置 pi、uv、python。Unix 的裸名称由 Command 使用子进程 PATH 查找；Windows 按有效 PATH 的目录顺序和 PATHEXT 中 .com/.exe/.bat/.cmd 的顺序定位入口，缺少 PATHEXT 时使用该默认列表。动作 env 中的 PATH/PATHEXT 覆盖应用继承值，Windows 变量名不区分大小写。
 - Windows 不隐式搜索启动器目录或当前工作目录。相对 PATH 项以动作 cwd 为基准，空项跳过；驱动器相对项如 C:bin 不参与查找。带路径的程序相对 cwd 解析，驱动器相对程序路径 C:foo 必须拒绝。已指定扩展名的存在文件优先使用原路径。
 - npm 的无扩展名 Unix shim 不作为 Windows 裸命令入口，查找 pi 可以命中 pi.cmd。启动时取得的绝对路径仅属于本次执行，不回写用户配置。修改系统 PATH 后需要重启常驻应用；不载入 PowerShell profile、alias 或函数。
-- 普通参数按数组传给 Command；Windows .cmd/.bat 由 Rust 标准库处理批处理转义，不自行拼接 cmd /c 命令字符串。仅参数输入模式替换 {{input}}；Script 的独立 {{script}} 参数替换为源码快照绝对路径。
+- 普通参数按数组传给 Command；Windows .cmd/.bat 由 Rust 标准库处理批处理转义，不自行拼接 cmd /c 命令字符串。仅参数输入模式替换 {{input}} 与 {{input-inline}}；Script 的独立 {{script}} 参数替换为源码快照绝对路径。
+- {{input}} 原样插入（多行保留）；{{input-inline}} 是输入的 JSON 字符串转义体（不含首尾引号），适用于字符串本身是 JSON 文本的插值点，也天然产出单行文本。两种占位符单遍替换，插入文本不再扫描，输入中的占位符字面量不会递归；语义在参数与 HTTP 处一致，是否适用由用户判断，脚本源码不参与替换。
 - stdin 输入完成后必须关闭，包括空输入。脚本是配置好的代码，用户输入是数据。
-- HTTP JSON 中的 {{input}} 只替换字符串值再序列化；环境变量引用 ${env:NAME} 只用于 HTTP 请求头。不会在任意字段执行模板代码。
+- HTTP JSON 中的占位符只替换字符串值再序列化，内层 JSON 文本由服务侧追加解析；环境变量引用 ${env:NAME} 只用于 HTTP 请求头。不会在任意字段执行模板代码。
