@@ -157,16 +157,22 @@ pub struct SuccessRule {
 }
 
 impl Config {
+    /// Only cwd whitespace is normalized; program and argument data stay untouched.
+    pub fn normalize(&mut self) {
+        self.settings.default_cwd = self.settings.default_cwd.trim().into();
+        for action in &mut self.actions {
+            action.cwd = action.cwd.as_ref().and_then(|cwd| {
+                let cwd = cwd.trim();
+                (!cwd.is_empty()).then(|| cwd.to_owned())
+            });
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self.version != 1 {
             return Err("仅支持配置 version: 1".into());
         }
-        let default_cwd = self.settings.default_cwd.trim();
-        if default_cwd.is_empty()
-            || !(default_cwd.starts_with('~') || std::path::Path::new(default_cwd).is_absolute())
-        {
-            return Err("默认工作目录必须是绝对路径或 ~/...".into());
-        }
+        super::paths::validate_cwd(&self.settings.default_cwd, false)?;
         if !(1..=200).contains(&self.settings.history_limit) {
             return Err("historyLimit 必须为 1–200".into());
         }
@@ -175,76 +181,87 @@ impl Config {
         }
         let mut ids = std::collections::HashSet::new();
         for action in &self.actions {
-            validate_id(&action.id)?;
+            let label = format!("动作 {} ({})", action.name, action.id);
+            validate_id(&action.id).map_err(|error| format!("{label}：{error}"))?;
             if !ids.insert(&action.id) {
-                return Err(format!("动作 ID 重复：{}", action.id));
+                return Err(format!("{label}：动作 ID 重复"));
             }
-            if action.name.trim().is_empty() {
-                return Err("动作名称不能为空".into());
+            action
+                .validate()
+                .map_err(|error| format!("{label}：{error}"))?;
+        }
+        Ok(())
+    }
+}
+
+impl Action {
+    fn validate(&self) -> Result<(), String> {
+        let action = self;
+        if action.name.trim().is_empty() {
+            return Err("动作名称不能为空".into());
+        }
+        if let Some(cwd) = action.cwd.as_deref().filter(|cwd| !cwd.trim().is_empty()) {
+            super::paths::validate_cwd(cwd, true)?;
+        }
+        if action.kind == ActionKind::Script {
+            if action.script_extension.is_empty()
+                || action.script_extension.len() > 10
+                || !action
+                    .script_extension
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric())
+            {
+                return Err("脚本扩展名只能包含英文字母和数字".into());
             }
-            if action.timeout_sec == Some(0) {
-                return Err("timeoutSec 必须为正数或 null".into());
+        }
+        if !action.enabled {
+            return Ok(());
+        }
+        if action.timeout_sec == Some(0) {
+            return Err("timeoutSec 必须为正数或 null".into());
+        }
+        if encoding_rs::Encoding::for_label(action.output.encoding.as_bytes()).is_none() {
+            return Err(format!("未知编码：{}", action.output.encoding));
+        }
+        if action.kind == ActionKind::Script && !action.args.iter().any(|arg| arg == "{{script}}") {
+            return Err("Script 参数必须包含独立的 {{script}} 参数".into());
+        }
+        if action.kind != ActionKind::Http {
+            if action.program.trim().is_empty() {
+                return Err(format!("{}：程序不能为空", action.name));
             }
-            if encoding_rs::Encoding::for_label(action.output.encoding.as_bytes()).is_none() {
-                return Err(format!("未知编码：{}", action.output.encoding));
+            let takes_input = ["{{input}}", "{{input-inline}}"];
+            if action.input == InputMode::Args
+                && !action
+                    .args
+                    .iter()
+                    .any(|arg| takes_input.iter().any(|token| arg.contains(token)))
+            {
+                return Err(format!(
+                    "{}：参数输入模式需要 {{{{input}}}} 或 {{{{input-inline}}}}",
+                    action.name
+                ));
             }
-            if action.kind == ActionKind::Script {
-                if action.script_extension.is_empty()
-                    || action.script_extension.len() > 10
-                    || !action
-                        .script_extension
-                        .bytes()
-                        .all(|c| c.is_ascii_alphanumeric())
-                {
-                    return Err("脚本扩展名只能包含英文字母和数字".into());
-                }
-                if !action.args.iter().any(|arg| arg == "{{script}}") {
-                    return Err("Script 参数必须包含独立的 {{script}} 参数".into());
+        } else {
+            let http = action.http.as_ref().ok_or("HTTP 动作缺少 http 配置")?;
+            let url = reqwest::Url::parse(&http.url).map_err(|_| "HTTP URL 无效")?;
+            if !["http", "https"].contains(&url.scheme()) {
+                return Err("只支持 HTTP/HTTPS URL".into());
+            }
+            reqwest::Method::from_bytes(http.method.as_bytes()).map_err(|_| "HTTP method 无效")?;
+            for pointer in [
+                http.response.pointer.as_ref(),
+                http.response.success.as_ref().map(|r| &r.pointer),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if !pointer.is_empty() && !pointer.starts_with('/') {
+                    return Err("结果路径使用 JSON Pointer，例如 /choices/0/message/content".into());
                 }
             }
-            if !action.enabled {
-                continue;
-            }
-            if action.kind != ActionKind::Http {
-                if action.program.trim().is_empty() {
-                    return Err(format!("{}：程序不能为空", action.name));
-                }
-                let takes_input = ["{{input}}", "{{input-inline}}"];
-                if action.input == InputMode::Args
-                    && !action
-                        .args
-                        .iter()
-                        .any(|arg| takes_input.iter().any(|token| arg.contains(token)))
-                {
-                    return Err(format!(
-                        "{}：参数输入模式需要 {{{{input}}}} 或 {{{{input-inline}}}}",
-                        action.name
-                    ));
-                }
-            } else {
-                let http = action.http.as_ref().ok_or("HTTP 动作缺少 http 配置")?;
-                let url = reqwest::Url::parse(&http.url).map_err(|_| "HTTP URL 无效")?;
-                if !["http", "https"].contains(&url.scheme()) {
-                    return Err("只支持 HTTP/HTTPS URL".into());
-                }
-                reqwest::Method::from_bytes(http.method.as_bytes())
-                    .map_err(|_| "HTTP method 无效")?;
-                for pointer in [
-                    http.response.pointer.as_ref(),
-                    http.response.success.as_ref().map(|r| &r.pointer),
-                ]
-                .into_iter()
-                .flatten()
-                {
-                    if !pointer.is_empty() && !pointer.starts_with('/') {
-                        return Err(
-                            "结果路径使用 JSON Pointer，例如 /choices/0/message/content".into()
-                        );
-                    }
-                }
-                if http.response.success.is_some() && http.response.format != ResponseFormat::Json {
-                    return Err("success 条件仅支持 JSON 返回".into());
-                }
+            if http.response.success.is_some() && http.response.format != ResponseFormat::Json {
+                return Err("success 条件仅支持 JSON 返回".into());
             }
         }
         Ok(())

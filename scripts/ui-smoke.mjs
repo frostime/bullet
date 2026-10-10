@@ -24,19 +24,62 @@ try {
   await input.fill('  你好，bullet。  '); await input.press('Control+Enter');
   await page.getByText('新输入',{exact:true}).waitFor();
   assert.equal((await page.locator('.result-scroll pre').textContent()).trim(),'你好，bullet。');
-  await fs.mkdir('screenshots',{recursive:true});
-  await page.screenshot({path:'screenshots/input-result.png'});
+  await fs.mkdir('tmp/ui-smoke',{recursive:true});
+  await fs.writeFile('tmp/.gitignore','*\n');
+  await page.screenshot({path:'tmp/ui-smoke/input-result.png'});
   await page.getByRole('button',{name:'配置动作',exact:true}).click();
   await page.getByRole('heading',{name:'配置动作',exact:true}).waitFor();
   await page.getByRole('textbox',{name:'脚本源码'}).fill('import sys\nprint(sys.stdin.read().upper())\n');
   await page.getByRole('button',{name:'保存脚本',exact:true}).click();
-  await page.getByText('脚本已保存',{exact:true}).waitFor();
+  await page.getByText('脚本已保存；动作配置未自动保存',{exact:true}).waitFor();
   const sidebarAction=page.locator('.actions-sidebar>button').first(); await sidebarAction.click();
   assert.match(await page.getByRole('textbox',{name:'脚本源码'}).inputValue(),/upper/);
-  await page.screenshot({path:'screenshots/settings.png'});
+  // Switching actions and routes must retain both source and configuration drafts.
+  await page.getByRole('textbox',{name:'脚本源码'}).fill('print("unsaved source")');
+  await page.locator('.actions-sidebar>button').nth(1).click();
+  await sidebarAction.click();
+  assert.equal(await page.getByRole('textbox',{name:'脚本源码'}).inputValue(),'print("unsaved source")');
+  await page.getByLabel('名称',{exact:true}).fill('未保存的动作名称');
+  await page.getByRole('button',{name:'任务',exact:true}).click();
+  await page.getByRole('button',{name:'动作',exact:true}).click();
+  assert.equal(await page.getByLabel('名称',{exact:true}).inputValue(),'未保存的动作名称');
+  assert.equal(await page.getByRole('textbox',{name:'脚本源码'}).inputValue(),'print("unsaved source")');
+
+  // Saved JSON must never be reverted by a stale form buffer.
+  await page.getByRole('button',{name:'编辑完整 JSON',exact:true}).click();
+  const raw = page.getByRole('textbox',{name:'完整配置 JSON'});
+  const edited = JSON.parse(await raw.inputValue());
+  edited.actions[0].args = ['-B','{{script}}'];
+  await raw.fill(JSON.stringify(edited,null,2));
+  await page.getByRole('button',{name:'保存配置',exact:true}).click();
+  await page.getByText('配置已保存；脚本源码需单独保存',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'表单视图',exact:true}).click();
+  assert.deepEqual(JSON.parse(await page.getByLabel('参数数组',{exact:true}).inputValue()),['-B','{{script}}']);
+  await page.getByRole('button',{name:'保存配置',exact:true}).click();
+  await page.getByText('配置已保存；脚本源码需单独保存',{exact:true}).waitFor();
+  assert.deepEqual(await page.evaluate(()=>JSON.parse(localStorage.getItem('bullet-demo-config')).actions[0].args),['-B','{{script}}']);
+  // Invalid JSON remains editable and does not force a save to switch views.
+  await page.getByRole('button',{name:'编辑完整 JSON',exact:true}).click();
+  await raw.fill('{unfinished');
+  await page.getByRole('button',{name:'表单视图',exact:true}).click();
+  assert.equal(await raw.inputValue(),'{unfinished');
+  page.once('dialog',dialog=>dialog.dismiss());
+  await page.getByRole('button',{name:'重新载入',exact:true}).click();
+  assert.equal(await raw.inputValue(),'{unfinished');
+  page.once('dialog',dialog=>dialog.accept());
+  await page.getByRole('button',{name:'重新载入',exact:true}).click();
+  await page.getByRole('button',{name:'表单视图',exact:true}).click();
+  // A rejected type change must not leave the select showing a different type than the editor.
+  const argsField = page.getByLabel('参数数组',{exact:true});
+  const validArgs = await argsField.inputValue();
+  await argsField.fill('[unfinished');
+  await page.getByLabel('动作类型',{exact:true}).selectOption('http');
+  assert.equal(await page.getByLabel('动作类型',{exact:true}).inputValue(),'script');
+  await argsField.fill(validArgs);
+  await page.screenshot({path:'tmp/ui-smoke/settings.png'});
   await page.getByRole('button',{name:'任务',exact:true}).click();
   assert.equal(await page.locator('.task-row').count(),2);
-  await page.screenshot({path:'screenshots/tasks.png'});
+  await page.screenshot({path:'tmp/ui-smoke/tasks.png'});
   await page.getByRole('button',{name:'返回桌面 ↗',exact:true}).click();
   await input.press('Escape');
   assert.equal(await input.isVisible(),false);
@@ -63,5 +106,5 @@ try {
   const content=page.locator('.management-content');
   assert.equal(await content.evaluate(element=>element.scrollHeight>element.clientHeight),true);
   assert.deepEqual(errors,[]);
-  console.log('UI smoke passed: Enter/Ctrl+Enter, detach/concurrency, result, script editor, task routing, collapse reset, 30-action menu, output and small-window scrolling.');
+  console.log('UI smoke passed: Enter/Ctrl+Enter, detach/concurrency, result, source/config draft retention, JSON/form round-trip, invalid JSON and discard confirmation, task routing, collapse reset, 30-action menu, output and small-window scrolling.');
 } finally { await browser.close(); await server.close(); }

@@ -24,6 +24,10 @@ struct AppState {
 }
 
 #[tauri::command]
+fn parse_config(json: String) -> Result<Config, String> {
+    serde_json::from_str(&json).map_err(|error| error.to_string())
+}
+#[tauri::command]
 fn load_config(state: State<AppState>) -> ConfigSnapshot {
     state.config.load()
 }
@@ -34,6 +38,14 @@ fn save_config(
     revision: String,
 ) -> Result<ConfigSnapshot, String> {
     state.config.save(config, &revision)
+}
+#[tauri::command]
+fn restore_config(
+    state: State<AppState>,
+    config: Config,
+    disk_revision: String,
+) -> Result<ConfigSnapshot, String> {
+    state.config.restore(config, &disk_revision)
 }
 #[tauri::command]
 fn read_script(
@@ -150,8 +162,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
+            parse_config,
             load_config,
             save_config,
+            restore_config,
             read_script,
             save_script,
             start_run,

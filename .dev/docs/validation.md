@@ -5,12 +5,31 @@ scope:
   - /src/**
   - /src-tauri/**
   - /scripts/**
-updated: 2026-10-09
+updated: 2026-10-11
 ---
 
-# 已执行的验证
+# 配置编辑重构验证（2026-10-11）
 
-本次环境为 Linux，Node.js 24.19、Rust 1.99。没有运行 Windows 应用或生成 NSIS 安装包。
+本轮环境为 Windows/MSYS，Node.js 24.14、Rust 1.95，浏览器交互使用本机 Edge 的无头模式。没有启动读取个人配置的桌面应用，没有生成安装包。
+
+| 检查 | 结果 | 能确认的范围 |
+| --- | --- | --- |
+| `npm run check` | 0 errors、0 warnings | 前端类型和 Svelte 模板 |
+| `npm test` | 11 tests passed | 编辑会话的 JSON/表单转换、草稿按动作与扩展名保留、重新载入取消与失败、不可用快照、异步串行、显式恢复及部分提交；原任务输出测试仍通过 |
+| `npm run build` | 通过 | 前端生产构建 |
+| `cargo test --manifest-path src-tauri/Cargo.toml --no-default-features` | 32 tests passed | 配置恢复备份与冲突、校验与 cwd 一致性、Windows 只读/文件占用替换失败、原执行和 Windows CLI 测试 |
+| `cargo check --manifest-path src-tauri/Cargo.toml` | 通过 | Windows 默认桌面 feature、新命令与权限配置编译；不代表运行验收 |
+| `npm run test:ui` | 通过 | 原交互回归及配置草稿、JSON 覆盖、丢弃确认；模拟 IPC 下恢复参数、输入锁定及部分提交错误展示 |
+
+变更涉及的 Rust 文件通过定向 rustfmt 检查。全仓库 `cargo fmt --all -- --check` 仍报告此前 `execution/mod.rs` 的格式差异，本轮未修改该执行模块。
+
+新 Rust 文件错误测试只使用独立临时目录。模拟 IPC 的测试使用真实组件和 bridge，但不调用 Rust、系统弹窗或真实任务；不将它视为原生 WebView 验收。UI 截图与日志在忽略的 `tmp/` 下。现有 execution 测试在 Windows 有 unused-import warning，本轮未改动无关代码。
+
+仍需人工验证原生管理窗口、系统确认弹窗、用户现场文件占用或权限，以及安装包。没有自动解除只读属性、提高权限或重试写入。配置 version 1 和脚本路径保持不变。
+
+# 原交付与 CLI 查找补丁验证（历史记录）
+
+以下是此前 Linux 环境的记录，不能替代上面的本轮结果。环境为 Linux，Node.js 24.19、Rust 1.99；未运行 Windows 应用或生成 NSIS 安装包。
 
 CLI 查找补丁重新执行核心测试和 Rust 格式检查；前端文件未修改，前端检查沿用原交付记录。Windows 路径模块单独进行了目标类型检查，未重跑完整桌面目标。
 

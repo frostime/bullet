@@ -4,7 +4,7 @@ description: 解释动作扩展、原生窗口和任务执行之间的依赖方�
 scope:
   - /src/**
   - /src-tauri/src/**
-updated: 2026-10-09
+updated: 2026-10-11
 ---
 
 # 架构边界
@@ -22,6 +22,7 @@ bullet 的使用入口只有文本和已配置动作。多步业务任务由用�
 | 任务状态、输出累计、历史 | [/src-tauri/src/execution/mod.rs](/src-tauri/src/execution/mod.rs) → `RunManager` | 关闭视图不影响任务；换前端也保留执行规则 |
 | 系统进程、网络返回协议 | [/src-tauri/src/execution/process.rs](/src-tauri/src/execution/process.rs)、[/src-tauri/src/execution/http.rs](/src-tauri/src/execution/http.rs) | uv、PI 无特殊分支；新增 HTTP 协议在执行端解析 |
 | 屏幕几何与窗口 | [/src-tauri/src/desktop/shell.rs](/src-tauri/src/desktop/shell.rs) | Svelte 提交期望高度；桌面端决定实际位置和尺寸 |
+| 配置草稿、视图转换、提交进度 | [/src/lib/config-editor.svelte.ts](/src/lib/config-editor.svelte.ts) | 管理窗口持有编辑会话，页面只渲染；新增字段不各自实现保存或版本规则 |
 | 前端连接与显示模型 | [/src/lib/bridge.ts](/src/lib/bridge.ts)、[/src/lib/types.ts](/src/lib/types.ts) | browser bridge 明确为模拟，原生通过 commands/Channel |
 
 ```mermaid
@@ -35,6 +36,14 @@ flowchart TD
 ```
 
 配置 Script 先冻结一个源文件版本，再复用 Process。版本文件属于 `.config/bullet`，不向用户工作目录散落临时脚本；运行中的版本不被源码编辑覆盖。
+
+## 配置编辑与磁盘状态
+
+前端编辑会话拥有未保存草稿，Rust 拥有已提交配置与配置语义。表单和 JSON 是同一草稿的编辑方式；文本输入允许暂时无效，但视图转换和提交必须由会话协调。源码草稿按动作与扩展名区分，不随当前页面销毁。异步编辑操作串行执行，界面在操作中禁用输入，避免迟到响应覆盖新内容。
+
+`revision` 表示最后有效配置，`diskRevision` 和 `diskStatus` 表示当前磁盘文件。无效磁盘文件仍可回退执行，但不能普通保存；显式恢复先备份原始内容，再复查磁盘版本并替换。配置与脚本不是跨文件事务，提交进度必须报告部分成功。文件错误包含目标路径和失败阶段，不自动重试或修改文件权限。
+
+保留配置 version 1、脚本目录与执行边界。不引入共享草稿服务、后台文件监视器、自动冲突合并或草稿磁盘持久化；若以后需要多窗口共享编辑，再重新评估会话归属。
 
 ## 原生窗口取舍
 

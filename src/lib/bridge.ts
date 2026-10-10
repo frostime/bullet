@@ -19,17 +19,41 @@ function loadDemoConfig(): Config {
 }
 function revision(value: unknown): string { return JSON.stringify(value); }
 function demoConfigSnapshot(): ConfigSnapshot {
-  return { config: structuredClone(demoConfig), revision: revision(demoConfig), directory: '~/.config/bullet (浏览器演示)', warning: null };
+  return { config: structuredClone(demoConfig), revision: revision(demoConfig), diskRevision: revision(demoConfig), diskStatus: 'valid', directory: '~/.config/bullet (浏览器演示)', warning: null };
 }
 
 export async function loadConfig(): Promise<ConfigSnapshot> { return native ? invoke('load_config') : demoConfigSnapshot(); }
+// Only native deserialization owns the schema/defaults. This browser projection is for interaction preview.
+export async function parseConfig(json: string): Promise<Config> {
+  if (native) return invoke('parse_config', { json });
+  const value = JSON.parse(json);
+  if (!value || typeof value !== 'object' || typeof value.version !== 'number'
+    || !value.settings || typeof value.settings !== 'object' || !Array.isArray(value.actions)) {
+    throw new Error('JSON 需要 version、settings 对象和 actions 数组');
+  }
+  return { ...value, settings: { ...defaults.settings, ...value.settings }, actions: value.actions.map((action: Partial<Action>) => {
+    if (!action || typeof action.id !== 'string' || typeof action.name !== 'string' || !action.kind || !['cli', 'script', 'http'].includes(action.kind)) {
+      throw new Error('每个动作需要 id、name 和有效 kind');
+    }
+    return { enabled: true, program: '', args: [], cwd: null, env: {}, input: 'stdin', timeoutSec: null,
+      scriptExtension: 'py', http: null, ...action,
+      output: Object.assign({ mode: 'live', encoding: 'utf-8' }, action.output),
+      ...(action.http ? { http: Object.assign({ method: 'POST', headers: {}, body: null }, action.http,
+        { response: Object.assign({ format: 'text' }, action.http.response) }) } : {}) };
+  }) };
+}
+export async function restoreConfig(config: Config, diskRevision: string): Promise<ConfigSnapshot> {
+  if (native) return invoke('restore_config', { config, diskRevision });
+  throw new Error('浏览器演示不读取磁盘，也不提供文件恢复');
+}
 export async function saveConfig(config: Config, expected: string): Promise<ConfigSnapshot> {
   if (native) return invoke('save_config', { config, revision: expected });
   if (revision(demoConfig) !== expected) throw new Error('配置已变化，请重新载入');
   if (config.version !== 1 || !Array.isArray(config.actions)) throw new Error('配置格式无效');
   const ids = config.actions.map(a => a.id);
   if (new Set(ids).size !== ids.length) throw new Error('动作 ID 重复');
-  demoConfig = JSON.parse(JSON.stringify(config)); localStorage.setItem('bullet-demo-config', JSON.stringify(config)); return demoConfigSnapshot();
+  const next = await parseConfig(JSON.stringify(config));
+  localStorage.setItem('bullet-demo-config', JSON.stringify(next)); demoConfig = next; return demoConfigSnapshot();
 }
 export async function readScript(id: string, extension: string): Promise<ScriptSnapshot> {
   if (native) return invoke('read_script', { id, extension });
@@ -106,6 +130,11 @@ export async function showRun(runId: string): Promise<void> {
 export async function resolveCwd(defaultCwd: string, cwd: string | null): Promise<string> {
   if (native) return invoke('resolve_action_cwd', { defaultCwd, cwd });
   return cwd || defaultCwd;
+}
+export async function confirmAction(message: string): Promise<boolean> {
+  if (!native) return window.confirm(message);
+  const { confirm } = await import('@tauri-apps/plugin-dialog');
+  return confirm(message, { title: 'bullet · 确认操作', kind: 'warning' });
 }
 export async function chooseDirectory(): Promise<string | null> {
   if (!native) return window.prompt('输入工作目录', 'C:\\Users\\you');

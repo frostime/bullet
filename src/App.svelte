@@ -4,6 +4,8 @@
   import Settings from './components/Settings.svelte';
   import Tasks from './components/Tasks.svelte';
   import * as bridge from './lib/bridge';
+  import { ConfigEditorSession } from './lib/config-editor.svelte';
+  const configEditor = new ConfigEditorSession(bridge);
   const surface = new URLSearchParams(location.search).get('surface') ?? 'preview';
   let expanded = $state(false);
   let route = $state(location.hash.slice(1));
@@ -50,7 +52,7 @@
 {#snippet management()}
   <div class="management-shell">
     <header class="management-nav"><a href="#settings" class="wordmark" onclick={() => navigate('settings')}>bullet<span>●</span></a><nav><button class:current={route !== 'tasks'} onclick={() => navigate('settings')}>动作</button><button class:current={route === 'tasks'} onclick={() => navigate('tasks')}>任务</button></nav><span class="grow"></span>{#if !bridge.native}<button class="quiet" onclick={() => navigate('')}>返回桌面 ↗</button>{/if}</header>
-    <main class="management-content">{#if route === 'tasks'}<Tasks />{:else}<Settings />{/if}</main>
+    <main class="management-content">{#if route === 'tasks'}<Tasks />{:else}<Settings session={configEditor} />{/if}</main>
   </div>
 {/snippet}
 

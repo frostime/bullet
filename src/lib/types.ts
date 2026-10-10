@@ -16,7 +16,15 @@ export interface Config {
   settings: { defaultCwd: string; notifications: 'background' | 'all' | 'off'; historyLimit: number; maxOutputBytes: number };
   actions: Action[];
 }
-export interface ConfigSnapshot { config: Config; revision: string; directory: string; warning: string | null }
+export interface ConfigSnapshot {
+  config: Config;
+  /** Revision of the last valid configuration, not necessarily the current disk bytes. */
+  revision: string;
+  diskRevision: string | null;
+  diskStatus: 'valid' | 'invalid' | 'unavailable';
+  directory: string;
+  warning: string | null;
+}
 export interface ScriptSnapshot { source: string; revision: string }
 export interface RunSnapshot {
   id: string; actionId: string; actionName: string; input: string; status: RunStatus; stage: string;
