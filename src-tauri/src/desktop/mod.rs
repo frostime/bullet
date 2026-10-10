@@ -3,7 +3,7 @@ mod shell;
 use crate::{
     config::{
         model::{Config, NotificationMode},
-        ConfigSnapshot, ConfigStore, ScriptSnapshot,
+        ConfigSnapshot, ConfigStore, ScriptSnapshot, Theme,
     },
     execution::{RunEvent, RunManager, RunStatus, RunSummary},
 };
@@ -16,6 +16,15 @@ use tauri::{
     Manager, State,
 };
 use tauri_plugin_notification::NotificationExt;
+
+impl From<Theme> for tauri::Theme {
+    fn from(theme: Theme) -> Self {
+        match theme {
+            Theme::Light => Self::Light,
+            Theme::Dark => Self::Dark,
+        }
+    }
+}
 
 struct AppState {
     config: Arc<ConfigStore>,
@@ -130,6 +139,14 @@ fn open_config_directory(state: State<AppState>) -> Result<(), String> {
     state.shell.open_directory()
 }
 #[tauri::command]
+fn get_theme(state: State<AppState>) -> Theme {
+    state.shell.theme()
+}
+#[tauri::command]
+fn set_theme(state: State<AppState>, theme: Theme) -> Result<Theme, String> {
+    state.shell.set_theme(theme)
+}
+#[tauri::command]
 fn selected_action(state: State<AppState>) -> Option<String> {
     state.shell.last_action()
 }
@@ -186,6 +203,8 @@ pub fn run() {
             resize_panel,
             open_management,
             open_config_directory,
+            get_theme,
+            set_theme,
             selected_action,
             select_action,
             resolve_action_cwd,

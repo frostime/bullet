@@ -336,12 +336,22 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    #[default]
+    Light,
+    Dark,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowState {
     pub bubble_x: Option<i32>,
     pub bubble_y: Option<i32>,
     pub last_action: Option<String>,
+    #[serde(default)]
+    pub theme: Theme,
 }
 
 #[cfg(test)]

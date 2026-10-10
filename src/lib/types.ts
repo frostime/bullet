@@ -1,3 +1,4 @@
+export type Theme = 'light' | 'dark';
 export type RunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled';
 export type ActionKind = 'cli' | 'script' | 'http';
 export type OutputMode = 'live' | 'buffered';

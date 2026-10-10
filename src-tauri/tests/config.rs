@@ -2,7 +2,7 @@ use bullet_core::config::{
     atomic_write, fingerprint,
     model::{ActionKind, Config},
     paths::resolve_cwd,
-    read_bounded, ConfigSnapshot, ConfigStore, DiskStatus,
+    read_bounded, ConfigSnapshot, ConfigStore, DiskStatus, Theme, WindowState,
 };
 use std::{fs, path::Path};
 
@@ -18,6 +18,22 @@ fn rejected<T>(result: Result<T, String>) -> String {
         Ok(_) => panic!("operation unexpectedly succeeded"),
         Err(error) => error,
     }
+}
+
+#[test]
+fn theme_round_trip_preserves_legacy_window_state() {
+    let legacy = br#"{"bubbleX":-800,"bubbleY":240,"lastAction":"normalize-text"}"#;
+    let mut state: WindowState = serde_json::from_slice(legacy).unwrap();
+    assert_eq!(state.theme, Theme::Light);
+    state.theme = Theme::Dark;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("state.json");
+    atomic_write(&path, &serde_json::to_vec(&state).unwrap()).unwrap();
+    let restored: WindowState = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+    assert_eq!(restored.theme, Theme::Dark);
+    assert_eq!(restored.bubble_x, Some(-800));
+    assert_eq!(restored.bubble_y, Some(240));
+    assert_eq!(restored.last_action.as_deref(), Some("normalize-text"));
 }
 
 #[test]

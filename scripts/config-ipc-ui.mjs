@@ -20,6 +20,7 @@ try{
      case 'plugin:event|listen':return 1;
      case 'plugin:event|unlisten':return;
      case 'plugin:dialog|message':return state.confirm?'Ok':'Cancel';
+     case 'get_theme':return 'light';
      case 'list_runs':return [];
      case 'load_config':return copy(state.snapshot);
      case 'parse_config':return JSON.parse(args.json);

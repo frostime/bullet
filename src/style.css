@@ -1,15 +1,49 @@
 :root {
     font-family: Arial, "Segoe UI", "Microsoft YaHei", sans-serif;
-    color: #22221f;
+    color: var(--ink);
     background: transparent;
     font-synthesis: none;
-    --paper: #f8f7f3;
+    color-scheme: light;
+    --paper: #f7f7f7;
     --surface: #fff;
-    --ink: #22221f;
-    --muted: #85857d;
-    --line: #e4e3dc;
+    --ink: #222;
+    --muted: #707070;
+    --line: #e0e0e0;
+    --hover: #ededed;
+    --selected: #e5e5e5;
+    --focus: #888;
+    --on-ink: #fff;
+    --bubble-hover: #3b3b3b;
+    --desktop: #efefef;
+    --grid: #00000005;
     --accent: #ba352a;
+    --error-bg: #fcf2ef;
+    --success: #546342;
+    --warning: #69501e;
+    --warning-bg: #faf5e9;
+    --warning-line: #ae8129;
     --radius: 10px;
+}
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --paper: #191919;
+    --surface: #222;
+    --ink: #ededed;
+    --muted: #aaa;
+    --line: #393939;
+    --hover: #2d2d2d;
+    --selected: #333;
+    --focus: #929292;
+    --on-ink: #191919;
+    --bubble-hover: #fff;
+    --desktop: #141414;
+    --grid: #ffffff06;
+    --accent: #ef8d83;
+    --error-bg: #342321;
+    --success: #aec49b;
+    --warning: #e2c786;
+    --warning-bg: #302a1e;
+    --warning-line: #c49b4a;
 }
 * {
     box-sizing: border-box;
@@ -65,7 +99,7 @@ input:focus,
 textarea:focus,
 select:focus {
     outline: none;
-    border-color: #99998e;
+    border-color: var(--focus);
 }
 textarea {
     resize: vertical;
@@ -109,7 +143,7 @@ pre {
 }
 .quiet:hover {
     color: var(--ink);
-    background: #f2f1ed;
+    background: var(--hover);
     border-radius: 3px;
 }
 .danger {
@@ -124,14 +158,14 @@ pre {
 }
 .primary {
     background: var(--ink);
-    color: white;
+    color: var(--on-ink);
 }
 .secondary {
     border: 1px solid var(--line);
     background: var(--surface);
 }
 .secondary:hover {
-    border-color: #b4b3a8;
+    border-color: var(--focus);
 }
 .notification-dot {
     display: inline-block;
@@ -157,13 +191,15 @@ pre {
     user-select: none;
 }
 .bubble:hover {
-    background: #383833;
+    background: var(--bubble-hover);
 }
-.bullet-mark {
-    width: 9px;
-    height: 9px;
-    background: var(--paper);
-    border-radius: 50%;
+.logo-mark {
+    display: inline-block;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    background: currentColor;
+    mask: url('/logo.svg') center / contain no-repeat;
 }
 .bubble-unread {
     position: absolute;
@@ -188,7 +224,7 @@ pre {
 }
 .input-card {
     background: var(--surface);
-    border: 1px solid #dddcd5;
+    border: 1px solid var(--line);
     border-radius: var(--radius);
     box-shadow: 0 5px 14px #0000000c;
     display: flex;
@@ -218,14 +254,14 @@ pre {
     overflow-y: auto;
 }
 .composer textarea::placeholder {
-    color: #aaa99f;
+    color: var(--muted);
 }
 .send-button {
     width: 34px;
     height: 34px;
     border-radius: 5px;
     background: var(--ink);
-    color: white;
+    color: var(--on-ink);
     flex-shrink: 0;
     font: 23px/1 Arial;
 }
@@ -237,7 +273,7 @@ pre {
     min-height: 34px;
 }
 .action-select {
-    color: #77776f;
+    color: var(--muted);
     font-size: 12px;
     padding: 5px 6px;
     max-width: 70%;
@@ -247,7 +283,7 @@ pre {
 }
 .chevron {
     margin-left: 7px;
-    color: #aaa99e;
+    color: var(--muted);
 }
 .quiet-controls {
     display: flex;
@@ -258,7 +294,7 @@ pre {
     width: 28px;
     height: 25px;
     font-size: 19px;
-    color: #8a8a80;
+    color: var(--muted);
 }
 .action-menu {
     background: var(--surface);
@@ -310,7 +346,7 @@ pre {
     flex-shrink: 0;
 }
 .status-label {
-    color: #606650;
+    color: var(--success);
     font-size: 11px;
 }
 .status-label.running {
@@ -337,7 +373,7 @@ pre {
 }
 .shortcut {
     font-size: 10px;
-    color: #b4b3a9;
+    color: var(--muted);
 }
 .waiting {
     font-size: 13px;
@@ -356,7 +392,7 @@ pre {
 .inline-error,
 .panel-error {
     color: var(--accent);
-    background: #fcf2ef;
+    background: var(--error-bg);
     border-left: 2px solid var(--accent);
     padding: 12px 14px;
     font-size: 12px;
@@ -412,14 +448,33 @@ pre {
     flex-shrink: 0;
 }
 .wordmark {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font-size: 22px;
     font-weight: 700;
     letter-spacing: -1.3px;
 }
-.wordmark span {
-    font-size: 8px;
-    color: var(--accent);
-    margin-left: 4px;
+.wordmark .logo-mark {
+    width: 28px;
+    height: 28px;
+}
+.theme-toggle {
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    color: var(--ink);
+}
+.theme-toggle:hover {
+    background: var(--hover);
+}
+.theme-toggle svg {
+    width: 18px;
+    height: 18px;
 }
 .management-nav nav {
     height: 100%;
@@ -496,9 +551,9 @@ h3 {
 .config-recovery {
     padding: 12px 16px;
     margin: 12px 0;
-    border-left: 3px solid #ae8129;
-    background: #faf5e9;
-    color: #69501e;
+    border-left: 3px solid var(--warning-line);
+    background: var(--warning-bg);
+    color: var(--warning);
     font-size: 13px;
 }
 
@@ -511,7 +566,7 @@ h3 {
 
 .save-message {
     font-size: 12px;
-    color: #626d50;
+    color: var(--success);
 }
 .preferences {
     display: grid;
@@ -552,7 +607,7 @@ h3 {
     color: var(--muted);
 }
 .actions-sidebar > button.selected {
-    background: #eae9e2;
+    background: var(--selected);
 }
 .add-actions {
     display: flex;
@@ -564,7 +619,7 @@ h3 {
     border: 1px solid var(--line);
     padding: 7px 8px;
     font-size: 10px;
-    background: white;
+    background: var(--surface);
 }
 .action-editor {
     padding: 20px 0 20px 28px;
@@ -606,7 +661,7 @@ h3 {
         Consolas,
         monospace;
     tab-size: 4;
-    background: #fff;
+    background: var(--surface);
 }
 .code-editor.compact {
     min-height: 88px;
@@ -639,7 +694,7 @@ h3 {
     font:
         11px/1.6 Consolas,
         monospace;
-    color: #626d50;
+    color: var(--success);
     margin: -8px 0 0;
     overflow-wrap: anywhere;
 }
@@ -733,7 +788,7 @@ details summary {
 .demo-desktop {
     height: 100vh;
     min-height: 500px;
-    background: #edede7;
+    background: var(--desktop);
     position: relative;
     overflow: hidden;
 }
@@ -751,21 +806,21 @@ details summary {
 .demo-intro p {
     font-size: 13px;
     line-height: 1.9;
-    color: #85857b;
+    color: var(--muted);
 }
 .demo-label {
     font-size: 10px;
-    color: #99998e;
+    color: var(--muted);
     margin-top: 30px;
-    border-top: 1px solid #d6d6cc;
+    border-top: 1px solid var(--line);
     padding-top: 14px;
 }
 .desktop-grid {
     position: absolute;
     inset: 0;
     background-image:
-        linear-gradient(#00000003 1px, transparent 1px),
-        linear-gradient(90deg, #00000003 1px, transparent 1px);
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
     background-size: 80px 80px;
 }
 .demo-dock {
@@ -790,7 +845,7 @@ details summary {
     position: absolute;
     inset: 5% 6%;
     z-index: 3;
-    border: 1px solid #d7d6cf;
+    border: 1px solid var(--line);
     border-radius: 8px;
     overflow: hidden;
     box-shadow: 0 24px 80px #0002;
@@ -808,7 +863,7 @@ details summary {
     font:
         9px/1.5 Consolas,
         monospace;
-    color: #96968c;
+    color: var(--muted);
     letter-spacing: 1px;
 }
 @keyframes pulse {

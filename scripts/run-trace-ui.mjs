@@ -82,6 +82,7 @@ try {
           case 'plugin:event|unlisten':return;
           case 'load_config':return {config,revision:'config-h1',diskRevision:'config-h1',diskStatus:'valid',directory:'C:/fixture',warning:null};
           case 'selected_action':return 'normalize-text';
+          case 'get_theme':return 'light';
           case 'list_runs':return [{...run,preview:run.input}];
           case 'attach_run':state.channel=args.channel;args.channel.onmessage({type:'snapshot',run:structuredClone(run)});return;
           case 'mark_run_read':

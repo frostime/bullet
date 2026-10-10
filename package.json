@@ -4,11 +4,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "icons": "node scripts/generate-icons.mjs",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "test:ui": "node scripts/ui-smoke.mjs && node scripts/config-ipc-ui.mjs && node scripts/run-trace-ui.mjs",
+    "test:ui": "node scripts/ui-smoke.mjs && node scripts/config-ipc-ui.mjs && node scripts/run-trace-ui.mjs && node scripts/theme-ui.mjs",
     "tauri": "tauri",
     "desktop": "tauri dev",
     "desktop:build": "tauri build"

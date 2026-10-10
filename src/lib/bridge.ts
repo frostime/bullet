@@ -2,7 +2,7 @@ import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import defaults from '../../src-tauri/defaults.json';
-import type { Action, Config, ConfigSnapshot, RunEvent, RunSnapshot, RunSummary, ScriptSnapshot, TraceEntry } from './types';
+import type { Action, Config, ConfigSnapshot, RunEvent, RunSnapshot, RunSummary, ScriptSnapshot, Theme, TraceEntry } from './types';
 
 export const native = isTauri();
 export const demoEvents = new EventTarget();
@@ -68,6 +68,16 @@ export async function saveScript(id: string, extension: string, source: string, 
   if (native) return invoke('save_script', { id, extension, source, revision: expected });
   if ((await readScript(id, extension)).revision !== expected) throw new Error('脚本已修改');
   const next = { source, revision: source }; demoScripts.set(id + '.' + extension, next); return next;
+}
+export async function getTheme(): Promise<Theme> {
+  if (native) return invoke('get_theme');
+  return localStorage.getItem('bullet-demo-theme') === 'dark' ? 'dark' : 'light';
+}
+export async function setTheme(theme: Theme): Promise<Theme> {
+  if (native) return invoke('set_theme', { theme });
+  localStorage.setItem('bullet-demo-theme', theme);
+  demoEvents.dispatchEvent(new CustomEvent('theme-changed', { detail: theme }));
+  return theme;
 }
 export async function selectedAction(): Promise<string | null> { return native ? invoke('selected_action') : selected; }
 export async function selectAction(id: string): Promise<void> { if (native) await invoke('select_action', { id }); else selected = id; }

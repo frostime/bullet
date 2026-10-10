@@ -1,4 +1,4 @@
-use crate::config::{atomic_write, WindowState};
+use crate::config::{atomic_write, Theme, WindowState};
 use std::sync::Mutex;
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder,
@@ -27,6 +27,7 @@ impl DesktopShell {
             WebviewUrl::App("index.html?surface=bubble".into()),
         )
         .title("bullet")
+        .theme(Some(shell.theme().into()))
         .inner_size(52.0, 52.0)
         .decorations(false)
         .transparent(true)
@@ -45,6 +46,7 @@ impl DesktopShell {
             WebviewUrl::App("index.html?surface=panel".into()),
         )
         .title("bullet")
+        .theme(Some(shell.theme().into()))
         .inner_size(520.0, 116.0)
         .decorations(false)
         .transparent(true)
@@ -179,6 +181,28 @@ impl DesktopShell {
             }
         }
     }
+    pub fn theme(&self) -> Theme {
+        self.state.lock().unwrap().theme
+    }
+    pub fn set_theme(&self, theme: Theme) -> Result<Theme, String> {
+        let mut state = self.state.lock().unwrap();
+        let previous = state.theme;
+        state.theme = theme;
+        let result = serde_json::to_vec(&*state)
+            .map_err(|error| error.to_string())
+            .and_then(|bytes| atomic_write(&self.directory.join("state.json"), &bytes));
+        if let Err(error) = result {
+            state.theme = previous;
+            return Err(error);
+        }
+        drop(state);
+        for window in self.app.webview_windows().values() {
+            let _ = window.set_theme(Some(theme.into()));
+        }
+        // Persistence is authoritative even if a WebView misses the notification.
+        let _ = self.app.emit("theme-changed", theme);
+        Ok(theme)
+    }
     pub fn last_action(&self) -> Option<String> {
         self.state.lock().unwrap().last_action.clone()
     }
@@ -203,6 +227,7 @@ impl DesktopShell {
                 WebviewUrl::App(format!("index.html?surface=manage#{route}").into()),
             )
             .title("bullet · 管理")
+            .theme(Some(self.theme().into()))
             .inner_size(980.0, 740.0)
             .min_inner_size(640.0, 480.0)
             .build()
